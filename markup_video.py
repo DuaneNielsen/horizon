@@ -2,7 +2,8 @@ import imageio as iio
 from matplotlib import pyplot as plt
 from matplotlib.backend_bases import MouseButton
 from numpy.random import default_rng
-
+import pickle
+from os.path import exists
 
 class Point:
     def __init__(self, x, y):
@@ -49,9 +50,11 @@ class HorizonMarkupTool:
         self.random_frames = self.rng.choice(self.num_frames, 100, replace=False)
 
         self.next_random = -1
-        self.ax.imshow(self.image)
-        self.fig.canvas.draw()
         self.origin = None
+
+        self.setup()
+
+    def setup(self):
 
         self.key_registry = {
             'n': self.next_image,
@@ -63,6 +66,22 @@ class HorizonMarkupTool:
 
         self.fig.canvas.mpl_connect('button_press_event', self.on_mouse_click)
         self.fig.canvas.mpl_connect('key_press_event', self.on_key_press)
+        self.draw()
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        del state['fig']
+        del state['ax']
+        del state['reader']
+        del state['num_frames']
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.fig, self.ax = plt.subplots()
+        self.reader = iio.get_reader(self.video_path)
+        self.num_frames = self.reader.count_frames()
+        self.setup()
 
     def on_key_press(self, event):
         print(event.key)
@@ -83,11 +102,11 @@ class HorizonMarkupTool:
         m_x, m_y = event.x, event.y
         if event.button is MouseButton.LEFT:
             x, y = self.ax.transData.inverted().transform([m_x, m_y])
-            origin = Point(x, y)
+            self.origin = Point(x, y)
 
         if event.button is MouseButton.RIGHT:
             x, y = self.ax.transData.inverted().transform([m_x, m_y])
-            line = Line(origin, Point(x, y))
+            line = Line(self.origin, Point(x, y))
             self.frames[self.frame].append(line)
             self.origin = None
 
@@ -131,6 +150,15 @@ class HorizonMarkupTool:
         self.draw()
 
 
-tool = HorizonMarkupTool('/home/duane/Downloads/drone_fpv1.mp4', 34897368)
+if exists('tool.pck'):
+    f = open('tool.pck', 'rb')
+    tool = pickle.load(f)
+    f.close()
+else:
+    tool = HorizonMarkupTool('/home/duane/Downloads/drone_fpv1.mp4', 34897368)
 
 plt.show()
+
+f = open('tool.pck', 'wb')
+pickle.dump(tool, f)
+f.close()
