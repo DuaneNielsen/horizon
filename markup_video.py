@@ -20,11 +20,11 @@ class Line:
         ax.plot([self.p1.x, self.p2.x], [self.p1.y, self.p2.y])
 
 
-class Frames:
+class FramesDB:
     def __init__(self):
         self.frames = {}
 
-    def __setitem__(self, key, item: Line):
+    def __setitem__(self, key, item):
         if key not in self.frames:
             self.frames[key] = [item]
         else:
@@ -41,10 +41,11 @@ class HorizonMarkupTool:
         self.fig, self.ax = plt.subplots()
         self.video_path = video_path
         self.seed = seed
-        self.frames = Frames()
+        self.lines = FramesDB()
+        self.tags = FramesDB()
         self.reader = iio.get_reader(self.video_path)
         self.num_frames = self.reader.count_frames()
-        self.frame = 0
+        self.curr_frame = 0
         self.image = self.reader.get_next_data()
         self.rng = default_rng(seed=self.seed)
         self.random_frames = self.rng.choice(self.num_frames, 100, replace=False)
@@ -61,12 +62,27 @@ class HorizonMarkupTool:
             'z': self.undo,
             'p': self.prev_image,
             'r': self.next_random_image,
-            'e': self.prev_random_image
+            'e': self.prev_random_image,
+            ' ': self.toggle_no_horizon
         }
 
         self.fig.canvas.mpl_connect('button_press_event', self.on_mouse_click)
         self.fig.canvas.mpl_connect('key_press_event', self.on_key_press)
         self.draw()
+
+    def has_tag(self, frame, tag):
+        for t in self.tags[frame]:
+            if tag == t:
+                return True
+        return False
+
+    def add_tag(self, frame, tag):
+        self.tags[self.curr_frame].append(tag)
+
+    def delete_tag(self, frame, tag):
+        for i, t in enumerate(self.tags[frame]):
+            if tag == t:
+                self.tags[frame].pop(i)
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -74,6 +90,7 @@ class HorizonMarkupTool:
         del state['ax']
         del state['reader']
         del state['num_frames']
+        del state['key_registry']
         return state
 
     def __setstate__(self, state):
@@ -92,9 +109,24 @@ class HorizonMarkupTool:
         self.ax.clear()
         if self.origin is not None:
             self.ax.scatter(self.origin.x, self.origin.y)
-        for line in self.frames[self.frame]:
+        for line in self.lines[self.curr_frame]:
             line.draw(self.ax)
         self.ax.imshow(self.image)
+
+        font = {'family': 'serif',
+                'color': 'red',
+                'weight': 'bold',
+                'size': 15
+                }
+
+        box = {'facecolor': 'none',
+               'edgecolor': 'red',
+               'boxstyle': 'round'
+               }
+
+        for i, t in enumerate(self.tags[self.curr_frame]):
+            self.ax.text(20, i * 60 + 60, t, fontdict=font, bbox=box)
+
         self.fig.canvas.draw()
 
     def on_mouse_click(self, event):
@@ -107,30 +139,30 @@ class HorizonMarkupTool:
         if event.button is MouseButton.RIGHT:
             x, y = self.ax.transData.inverted().transform([m_x, m_y])
             line = Line(self.origin, Point(x, y))
-            self.frames[self.frame].append(line)
+            self.lines[self.curr_frame].append(line)
             self.origin = None
 
         self.draw()
 
     def next_image(self, event):
-        if self.frame + 50 < self.num_frames:
-            self.frame += 50
-        self.reader.set_image_index(self.frame)
+        if self.curr_frame + 50 < self.num_frames:
+            self.curr_frame += 50
+        self.reader.set_image_index(self.curr_frame)
         self.image = self.reader.get_next_data()
         self.draw()
 
     def prev_image(self, event):
-        if self.frame >= 50:
-            self.frame -= 50
-        self.reader.set_image_index(self.frame)
+        if self.curr_frame >= 50:
+            self.curr_frame -= 50
+        self.reader.set_image_index(self.curr_frame)
         self.image = self.reader.get_next_data()
         self.draw()
 
     def next_random_image(self, event):
         if self.next_random < len(self.random_frames):
             self.next_random += 1
-        self.frame = self.random_frames[self.next_random]
-        self.reader.set_image_index(self.frame)
+        self.curr_frame = self.random_frames[self.next_random]
+        self.reader.set_image_index(self.curr_frame)
         self.image = self.reader.get_next_data()
         self.draw()
 
@@ -139,14 +171,21 @@ class HorizonMarkupTool:
             self.next_random -= 1
         else:
             self.next_random = 0
-        self.frame = self.random_frames[self.next_random]
-        self.reader.set_image_index(self.frame)
+        self.curr_frame = self.random_frames[self.next_random]
+        self.reader.set_image_index(self.curr_frame)
         self.image = self.reader.get_next_data()
         self.draw()
 
     def undo(self, event):
-        if len(self.frames[self.frame]) > 0:
-            self.frames[self.frame].pop(-1)
+        if len(self.lines[self.curr_frame]) > 0:
+            self.lines[self.curr_frame].pop(-1)
+        self.draw()
+
+    def toggle_no_horizon(self, event):
+        if not self.has_tag(self.curr_frame, 'no_horizon'):
+            self.add_tag(self.curr_frame, 'no_horizon')
+        else:
+            self.delete_tag(self.curr_frame, 'no_horizon')
         self.draw()
 
 
