@@ -35,121 +35,102 @@ class Frames:
         return self.frames[key]
 
 
-x_pts = []
-y_pts = []
+class HorizonMarkupTool:
+    def __init__(self, video_path, seed):
+        self.fig, self.ax = plt.subplots()
+        self.video_path = video_path
+        self.seed = seed
+        self.frames = Frames()
+        self.reader = iio.get_reader(self.video_path)
+        self.num_frames = self.reader.count_frames()
+        self.frame = 0
+        self.image = self.reader.get_next_data()
+        self.rng = default_rng(seed=self.seed)
+        self.random_frames = self.rng.choice(self.num_frames, 100, replace=False)
 
-fig, ax = plt.subplots()
+        self.next_random = -1
+        self.ax.imshow(self.image)
+        self.fig.canvas.draw()
+        self.origin = None
 
-reader = iio.get_reader('/home/duane/Downloads/drone_fpv1.mp4')
-num_frames = reader.count_frames()
-frame = 0
-image = reader.get_next_data()
-frames = Frames()
-rng = default_rng()
-random_frames = rng.choice(num_frames, 100, replace=False)
-next_random = -1
-ax.imshow(image)
-fig.canvas.draw()
+        self.key_registry = {
+            'n': self.next_image,
+            'z': self.undo,
+            'p': self.prev_image,
+            'r': self.next_random_image,
+            'e': self.prev_random_image
+        }
 
-origin = None
+        self.fig.canvas.mpl_connect('button_press_event', self.on_mouse_click)
+        self.fig.canvas.mpl_connect('key_press_event', self.on_key_press)
 
+    def on_key_press(self, event):
+        print(event.key)
+        if event.key in self.key_registry:
+            self.key_registry[event.key](event)
 
-def draw():
-    ax.clear()
-    if origin is not None:
-        ax.scatter(origin.x, origin.y)
-    for line in frames[frame]:
-        line.draw(ax)
-    ax.imshow(image)
-    fig.canvas.draw()
+    def draw(self):
+        self.ax.clear()
+        if self.origin is not None:
+            self.ax.scatter(self.origin.x, self.origin.y)
+        for line in self.frames[self.frame]:
+            line.draw(self.ax)
+        self.ax.imshow(self.image)
+        self.fig.canvas.draw()
 
+    def on_mouse_click(self, event):
 
-def on_mouse_click(event):
-    global origin
-    m_x, m_y = event.x, event.y
-    if event.button is MouseButton.LEFT:
-        x, y = ax.transData.inverted().transform([m_x, m_y])
-        origin = Point(x, y)
+        m_x, m_y = event.x, event.y
+        if event.button is MouseButton.LEFT:
+            x, y = self.ax.transData.inverted().transform([m_x, m_y])
+            origin = Point(x, y)
 
-    if event.button is MouseButton.RIGHT:
-        x, y = ax.transData.inverted().transform([m_x, m_y])
-        line = Line(origin, Point(x, y))
-        frames[frame].append(line)
-        origin = None
+        if event.button is MouseButton.RIGHT:
+            x, y = self.ax.transData.inverted().transform([m_x, m_y])
+            line = Line(origin, Point(x, y))
+            self.frames[self.frame].append(line)
+            self.origin = None
 
-    draw()
+        self.draw()
 
+    def next_image(self, event):
+        if self.frame + 50 < self.num_frames:
+            self.frame += 50
+        self.reader.set_image_index(self.frame)
+        self.image = self.reader.get_next_data()
+        self.draw()
 
-def next_image(event):
-    global frame
-    global image
-    frame += 50
-    reader.set_image_index(frame)
-    image = reader.get_next_data()
-    draw()
+    def prev_image(self, event):
+        if self.frame >= 50:
+            self.frame -= 50
+        self.reader.set_image_index(self.frame)
+        self.image = self.reader.get_next_data()
+        self.draw()
 
+    def next_random_image(self, event):
+        if self.next_random < len(self.random_frames):
+            self.next_random += 1
+        self.frame = self.random_frames[self.next_random]
+        self.reader.set_image_index(self.frame)
+        self.image = self.reader.get_next_data()
+        self.draw()
 
-def prev_image(event):
-    global frame
-    global image
-    if frame >= 50:
-        frame -= 50
-    reader.set_image_index(frame)
-    image = reader.get_next_data()
-    draw()
+    def prev_random_image(self, event):
+        if self.next_random > 0:
+            self.next_random -= 1
+        else:
+            self.next_random = 0
+        self.frame = self.random_frames[self.next_random]
+        self.reader.set_image_index(self.frame)
+        self.image = self.reader.get_next_data()
+        self.draw()
 
-
-def next_random_image(event):
-    global frame
-    global random_frames
-    global next_random
-    global image
-    if next_random < len(random_frames):
-        next_random += 1
-    frame = random_frames[next_random]
-    reader.set_image_index(frame)
-    image = reader.get_next_data()
-    draw()
-
-
-def prev_random_image(event):
-    global frame
-    global random_frames
-    global next_random
-    global image
-    if next_random > 0:
-        next_random -= 1
-    else:
-        next_random = 0
-    frame = random_frames[next_random]
-    reader.set_image_index(frame)
-    image = reader.get_next_data()
-    draw()
-
-
-def undo(event):
-    global frame
-    if len(frames[frame]) > 0:
-        frames[frame].pop(-1)
-    draw()
+    def undo(self, event):
+        if len(self.frames[self.frame]) > 0:
+            self.frames[self.frame].pop(-1)
+        self.draw()
 
 
-key_registry = {
-    'n': next_image,
-    'z': undo,
-    'p': prev_image,
-    'r': next_random_image,
-    'e': prev_random_image
-}
-
-
-def on_key_press(event):
-    print(event.key)
-    if event.key in key_registry:
-        key_registry[event.key](event)
-
-
-fig.canvas.mpl_connect('button_press_event', on_mouse_click)
-fig.canvas.mpl_connect('key_press_event', on_key_press)
+tool = HorizonMarkupTool('/home/duane/Downloads/drone_fpv1.mp4', 34897368)
 
 plt.show()
