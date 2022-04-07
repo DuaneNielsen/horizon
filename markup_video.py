@@ -4,11 +4,16 @@ from matplotlib.backend_bases import MouseButton
 from numpy.random import default_rng
 import pickle
 from os.path import exists
+import os
+
 
 class Point:
     def __init__(self, x, y):
         self.x = x
         self.y = y
+
+    def __repr__(self):
+        return f'({self.x}, {self.y})'
 
 
 class Line:
@@ -18,6 +23,9 @@ class Line:
 
     def draw(self, ax):
         ax.plot([self.p1.x, self.p2.x], [self.p1.y, self.p2.y])
+
+    def __repr__(self):
+        return f'[{self.p1}, {self.p2}]'
 
 
 class FramesDB:
@@ -47,15 +55,20 @@ class HorizonMarkupTool:
         self.num_frames = self.reader.count_frames()
         self.curr_frame = 0
         self.image = self.reader.get_next_data()
-        self.rng = default_rng(seed=self.seed)
-        self.random_frames = self.rng.choice(self.num_frames, 100, replace=False)
-
         self.next_random = -1
+
+        # forward declarations
         self.origin = None
+        self.rng = None
+        self.random_frames = None
+        self.key_registry = None
 
         self.setup()
 
     def setup(self):
+
+        self.rng = default_rng(seed=self.seed)
+        self.random_frames = self.rng.choice(self.num_frames, self.num_frames, replace=False)
 
         self.key_registry = {
             'n': self.next_image,
@@ -63,7 +76,8 @@ class HorizonMarkupTool:
             'p': self.prev_image,
             'r': self.next_random_image,
             'e': self.prev_random_image,
-            ' ': self.toggle_no_horizon
+            ' ': self.toggle_no_horizon,
+            'w': self.write_dataset
         }
 
         self.fig.canvas.mpl_connect('button_press_event', self.on_mouse_click)
@@ -91,6 +105,8 @@ class HorizonMarkupTool:
         del state['reader']
         del state['num_frames']
         del state['key_registry']
+        del state['rng']
+        del state['random_frames']
         return state
 
     def __setstate__(self, state):
@@ -101,7 +117,6 @@ class HorizonMarkupTool:
         self.setup()
 
     def on_key_press(self, event):
-        print(event.key)
         if event.key in self.key_registry:
             self.key_registry[event.key](event)
 
@@ -187,6 +202,18 @@ class HorizonMarkupTool:
         else:
             self.delete_tag(self.curr_frame, 'no_horizon')
         self.draw()
+
+    def write_dataset(self, event):
+
+        if exists('data/horizon/lines.csv'):
+            os.remove('data/horizon/lines.csv')
+
+        for frame, lines in self.lines.frames.items():
+            if len(lines) > 0:
+                self.reader.set_image_index(frame)
+                iio.imwrite(f'data/horizon/{frame}.png', self.reader.get_next_data(), 'png')
+                with open('data/horizon/lines.csv', 'a') as f:
+                    f.write(f'{frame} : {[line for line in lines]}\n')
 
 
 if exists('tool.pck'):
