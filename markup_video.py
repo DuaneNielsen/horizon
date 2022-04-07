@@ -5,6 +5,7 @@ from numpy.random import default_rng
 import pickle
 from os.path import exists
 import os
+from tqdm import tqdm
 
 
 class Point:
@@ -14,6 +15,14 @@ class Point:
 
     def __repr__(self):
         return f'({self.x}, {self.y})'
+
+    def __eq__(self, other):
+        if not isinstance(other, Point):
+            return NotImplemented
+        return self.x == self.other.x and self.y == self.other.y
+
+    def draw(self, ax):
+        ax.scatter(self.x, self.y)
 
 
 class Line:
@@ -43,6 +52,14 @@ class FramesDB:
             self.frames[key] = []
         return self.frames[key]
 
+    def __len__(self):
+        # ignore keys that are not populated
+        length = 0
+        for key, value in self.frames.items():
+            if len(value) > 0:
+                length += 1
+        return length
+
 
 class HorizonMarkupTool:
     def __init__(self, video_path, seed):
@@ -58,7 +75,6 @@ class HorizonMarkupTool:
         self.next_random = -1
 
         # forward declarations
-        self.origin = None
         self.rng = None
         self.random_frames = None
         self.key_registry = None
@@ -77,7 +93,8 @@ class HorizonMarkupTool:
             'r': self.next_random_image,
             'e': self.prev_random_image,
             ' ': self.toggle_no_horizon,
-            'w': self.write_dataset
+            'w': self.write_dataset,
+            'd': self.toggle_discard_tag
         }
 
         self.fig.canvas.mpl_connect('button_press_event', self.on_mouse_click)
@@ -97,6 +114,16 @@ class HorizonMarkupTool:
         for i, t in enumerate(self.tags[frame]):
             if tag == t:
                 self.tags[frame].pop(i)
+
+    def toggle_tag(self, tag):
+        """
+        Toggles the teg on and off
+        :param tag: the tag to toggle
+        """
+        if not self.has_tag(self.curr_frame, tag):
+            self.add_tag(self.curr_frame, tag)
+        else:
+            self.delete_tag(self.curr_frame, tag)
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -122,10 +149,10 @@ class HorizonMarkupTool:
 
     def draw(self):
         self.ax.clear()
-        if self.origin is not None:
-            self.ax.scatter(self.origin.x, self.origin.y)
-        for line in self.lines[self.curr_frame]:
-            line.draw(self.ax)
+
+        for widget in self.lines[self.curr_frame]:
+            widget.draw(self.ax)
+
         self.ax.imshow(self.image)
 
         font = {'family': 'serif',
@@ -140,22 +167,39 @@ class HorizonMarkupTool:
                }
 
         for i, t in enumerate(self.tags[self.curr_frame]):
-            self.ax.text(20, i * 60 + 60, t, fontdict=font, bbox=box)
+            self.ax.text(20, i * 100 + 60, t, fontdict=font, bbox=box)
 
         self.fig.canvas.draw()
 
     def on_mouse_click(self, event):
 
         m_x, m_y = event.x, event.y
+
         if event.button is MouseButton.LEFT:
             x, y = self.ax.transData.inverted().transform([m_x, m_y])
-            self.origin = Point(x, y)
+            print(m_x, m_y)
+            print(x, y)
+            pnt = Point(x, y)
+
+            if len(self.lines[self.curr_frame]) == 0:
+                self.lines[self.curr_frame].append(pnt)
+            elif isinstance(self.lines[self.curr_frame][-1], Point):
+                self.lines[self.curr_frame][-1] = pnt
+            else:
+                self.lines[self.curr_frame].append(pnt)
 
         if event.button is MouseButton.RIGHT:
+
             x, y = self.ax.transData.inverted().transform([m_x, m_y])
-            line = Line(self.origin, Point(x, y))
-            self.lines[self.curr_frame].append(line)
-            self.origin = None
+
+            if len(self.lines[self.curr_frame]) is not None:
+                origin = None
+                if isinstance(self.lines[self.curr_frame][-1], Point):
+                    origin = self.lines[self.curr_frame][-1]
+                if isinstance(self.lines[self.curr_frame][-1], Line):
+                    origin = self.lines[self.curr_frame][-1].p1
+
+                self.lines[self.curr_frame][-1] = Line(origin, Point(x, y))
 
         self.draw()
 
@@ -197,18 +241,27 @@ class HorizonMarkupTool:
         self.draw()
 
     def toggle_no_horizon(self, event):
-        if not self.has_tag(self.curr_frame, 'no_horizon'):
-            self.add_tag(self.curr_frame, 'no_horizon')
-        else:
-            self.delete_tag(self.curr_frame, 'no_horizon')
+        self.toggle_tag('no_horizon')
         self.draw()
+
+    def toggle_discard_tag(self, event):
+        self.toggle_tag('discard')
+        self.draw()
+
+    def get_lines(self, frame):
+        lines = []
+        for widget in self.lines[frame]:
+            if isinstance(widget, Line):
+                lines.append(widget)
+        return lines
 
     def write_dataset(self, event):
 
         if exists('data/horizon/lines.csv'):
             os.remove('data/horizon/lines.csv')
 
-        for frame, lines in self.lines.frames.items():
+        for frame, widgets in tqdm(self.lines.frames.items(), total=len(self.lines)):
+            lines = self.get_lines(frame)
             if len(lines) > 0:
                 self.reader.set_image_index(frame)
                 iio.imwrite(f'data/horizon/{frame}.png', self.reader.get_next_data(), 'png')
