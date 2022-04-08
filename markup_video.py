@@ -5,10 +5,11 @@ from numpy.random import default_rng
 import pickle
 from os.path import exists
 import os
-from tqdm import tqdm
+import numpy as np
+import json
 
 
-class Point:
+class Point(object):
     def __init__(self, x, y):
         self.x = x
         self.y = y
@@ -21,17 +22,35 @@ class Point:
             return NotImplemented
         return self.x == self.other.x and self.y == self.other.y
 
+    @property
+    def flat(self):
+        return {'x': float(self.x), 'y': float(self.y)}
+
     def draw(self, ax):
         ax.scatter(self.x, self.y)
 
 
-class Line:
+class Line(object):
     def __init__(self, p1, p2):
         self.p1 = p1
         self.p2 = p2
 
     def draw(self, ax):
         ax.plot([self.p1.x, self.p2.x], [self.p1.y, self.p2.y])
+
+    @property
+    def flat(self):
+        return [self.p1.flat, self.p2.flat]
+
+    @staticmethod
+    def from_flat(flat_line):
+        return Line(Point(flat_line[0]['x'], flat_line[0]['y']), Point(flat_line[1]['x'], flat_line[1]['y']))
+
+    def as_list(self):
+        return [[self.p1.x, self.p2.x], [self.p1.y, self.p2.y]]
+
+    def to_numpy(self):
+        return np.array(self.as_list())
 
     def __repr__(self):
         return f'[{self.p1}, {self.p2}]'
@@ -59,6 +78,10 @@ class FramesDB:
             if len(value) > 0:
                 length += 1
         return length
+
+    def populated(self):
+        # returns a dict of populated keys
+        return {key: value for key, value in self.frames.items() if len(value) > 0}
 
 
 class HorizonMarkupTool:
@@ -99,6 +122,7 @@ class HorizonMarkupTool:
 
         self.fig.canvas.mpl_connect('button_press_event', self.on_mouse_click)
         self.fig.canvas.mpl_connect('key_press_event', self.on_key_press)
+
         self.draw()
 
     def has_tag(self, frame, tag):
@@ -176,9 +200,8 @@ class HorizonMarkupTool:
         m_x, m_y = event.x, event.y
 
         if event.button is MouseButton.LEFT:
+
             x, y = self.ax.transData.inverted().transform([m_x, m_y])
-            print(m_x, m_y)
-            print(x, y)
             pnt = Point(x, y)
 
             if len(self.lines[self.curr_frame]) == 0:
@@ -192,7 +215,7 @@ class HorizonMarkupTool:
 
             x, y = self.ax.transData.inverted().transform([m_x, m_y])
 
-            if len(self.lines[self.curr_frame]) is not None:
+            if len(self.lines[self.curr_frame]) > 0:
                 origin = None
                 if isinstance(self.lines[self.curr_frame][-1], Point):
                     origin = self.lines[self.curr_frame][-1]
@@ -260,24 +283,45 @@ class HorizonMarkupTool:
         if exists('data/horizon/lines.csv'):
             os.remove('data/horizon/lines.csv')
 
-        for frame, widgets in tqdm(self.lines.frames.items(), total=len(self.lines)):
+        with open('data/horizon/lines.json', 'w') as f:
+            flat_dict = {}
+            for key, value in self.lines.populated().items():
+                lines = [l.flat for l in value if isinstance(l, Line)]
+                flat_dict[str(key)] = lines
+            s = json.dumps(flat_dict)
+            f.write(s)
+
+        num_images = len(self.lines)
+        count = 0
+
+        for frame in self.lines.frames:
             lines = self.get_lines(frame)
             if len(lines) > 0:
-                self.reader.set_image_index(frame)
-                iio.imwrite(f'data/horizon/{frame}.png', self.reader.get_next_data(), 'png')
-                with open('data/horizon/lines.csv', 'a') as f:
-                    f.write(f'{frame} : {[line for line in lines]}\n')
+                filename = f'data/horizon/{frame}.png'
+                if not exists(filename):
+                    self.reader.set_image_index(frame)
+                    iio.imwrite(f'data/horizon/{frame}.png', self.reader.get_next_data(), 'png')
+
+                self.ax.clear()
+                count += 1
+                self.ax.clear()
+                self.ax.set_xlim((0, num_images))
+                self.ax.barh('progress', count, height=10)
+                self.fig.canvas.draw()
+
+        self.draw()
 
 
-if exists('tool.pck'):
-    f = open('tool.pck', 'rb')
-    tool = pickle.load(f)
+if __name__ == '__main__':
+    if exists('tool.pck'):
+        f = open('tool.pck', 'rb')
+        tool = pickle.load(f)
+        f.close()
+    else:
+        tool = HorizonMarkupTool('/home/duane/Downloads/drone_fpv1.mp4', 34897368)
+
+    plt.show()
+
+    f = open('tool.pck', 'wb')
+    pickle.dump(tool, f)
     f.close()
-else:
-    tool = HorizonMarkupTool('/home/duane/Downloads/drone_fpv1.mp4', 34897368)
-
-plt.show()
-
-f = open('tool.pck', 'wb')
-pickle.dump(tool, f)
-f.close()
