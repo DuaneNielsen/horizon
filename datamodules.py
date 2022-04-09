@@ -3,6 +3,7 @@ from pytorch_lightning.utilities.types import TRAIN_DATALOADERS, EVAL_DATALOADER
 import json
 from markup_video import Line, Point
 import numpy as np
+from torchvision.io import read_image
 
 
 class HorizonDataSet:
@@ -18,12 +19,19 @@ class HorizonDataSet:
 
     def __getitem__(self, item):
         # load the serialized form into a numpy array
-        lines = np.stack([Line.from_flat(line).to_numpy() for line in self.lines[self.index[item]]])
+        lines = np.stack([Line.from_flat(line).to_numpy() for line in self.lines[self.index[item]]], axis=-1)
 
-        # compute l2 norm for each line ( rise - run in normal form )
-        slope = (lines[:, :, 1] - lines[:, :, 0]).T
-        length = np.linalg.norm(slope, axis=0, keepdims=True)
-        return slope/length
+        # compute l2 norm for each line ( rise - run in normal form ), then convert to complex plane, and angle
+        slope = (lines[:, 1, :] - lines[:, 0, :])
+        length = np.linalg.norm(slope, ord=2, axis=0, keepdims=True)
+        complex = (slope / length).T.copy().view(np.complex128)
+        angle = np.angle(complex.mean())
+        labels = {
+            'lines': lines,
+            'complex': complex,
+            'angle': angle
+        }
+        return read_image(f'{self.data_dir}/{self.index[item]}.png'), labels
 
 
 class HorizonAnglesDataModule(LightningDataModule):
