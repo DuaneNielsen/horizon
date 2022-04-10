@@ -4,9 +4,11 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import LearningRateMonitor
 from pytorch_lightning.plugins import DDPPlugin
 from pytorch_lightning.loggers import WandbLogger
-from pl_bolts.datamodules import MNISTDataModule
 import torchmetrics
 import wandb
+from argparse import ArgumentParser, Namespace
+import datamodules
+from pytorch_lightning.utilities import argparse as pl_argparse
 
 
 class WandbImagePredCallback(pl.Callback):
@@ -18,7 +20,6 @@ class WandbImagePredCallback(pl.Callback):
         self.num_samples = num_samples
 
     def on_validation_epoch_end(self, trainer, pl_module):
-
         val_loader = trainer.datamodule.val_dataloader()
         val_data = []
         for i in range(self.num_samples):
@@ -37,41 +38,29 @@ class WandbImagePredCallback(pl.Callback):
         })
 
 
-class LightningMNISTClassifier(pl.LightningModule):
+class HorizonRollClassifier(pl.LightningModule):
 
-    def __init__(self, lr):
-        super(LightningMNISTClassifier, self).__init__()
-
-        # mnist images are (1, 28, 28) (channels, width, height)
-        self.layer_1 = torch.nn.Linear(28 * 28, 128)
-        self.layer_2 = torch.nn.Linear(128, 256)
-        self.layer_3 = torch.nn.Linear(256, 10)
-        self.lr_rate = lr
-
+    def __init__(self, model: str, lr: float = 1e-4):
+        super().__init__()
+        self.save_hyperparameters()
+        self.model = torch.hub.load('rwightman/gen-efficientnet-pytorch', 'efficientnet_b0')
         self.train_acc = torchmetrics.Accuracy()
         self.val_acc = torchmetrics.Accuracy()
 
+    @classmethod
+    def from_argparse_args(cls, args):
+        kwargs = {}
+        for name, tipe, default in pl_argparse.get_init_arguments_and_types(cls):
+            kwargs[name] = vars(args)[name]
+        return cls(**kwargs)
+
+    @classmethod
+    def add_argparse_args(cls, parser):
+        for name, tipe, default in pl_argparse.get_init_arguments_and_types(cls):
+            parser.add_argument(f'--{name}', type=tipe[0], default=default)
+
     def forward(self, x):
-        batch_size, channels, width, height = x.size()
-
-        # (b, 1, 28, 28) -> (b, 1*28*28)
-        x = x.view(batch_size, -1)
-
-        # layer 1 (b, 1*28*28) -> (b, 128)
-        x = self.layer_1(x)
-        x = torch.relu(x)
-
-        # layer 2 (b, 128) -> (b, 256)
-        x = self.layer_2(x)
-        x = torch.relu(x)
-
-        # layer 3 (b, 256) -> (b, 10)
-        x = self.layer_3(x)
-
-        # probability distribution over labels
-        x = torch.softmax(x, dim=1)
-
-        return x
+        return self.model.forward(x)
 
     def cross_entropy_loss(self, logits, labels):
         return F.nll_loss(logits, labels)
@@ -114,7 +103,7 @@ class LightningMNISTClassifier(pl.LightningModule):
         return {'avg_test_loss': avg_loss, 'log': tensorboard_logs}
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr_rate)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
         lr_scheduler = {'scheduler': torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.95),
                         'name': 'expo_lr'}
         return [optimizer], [lr_scheduler]
@@ -133,13 +122,18 @@ class LightningMNISTClassifier(pl.LightningModule):
 
 
 if __name__ == '__main__':
+    parser = ArgumentParser()
+    pl.Trainer.add_argparse_args(parser)
+    HorizonRollClassifier.add_argparse_args(parser)
+    args = parser.parse_args()
 
-    wandb_logger = WandbLogger(project='lightning_demo_mnist')
-    mnist = MNISTDataModule(num_workers=0)
-    model = LightningMNISTClassifier(lr=1e-3)
+    wandb_logger = WandbLogger(project='horizon')
+    mnist = datamodules.HorizonAnglesDataModule(data_dir='./data/horizon',
+                                                batch_size=8, num_workers=0)
+    model = HorizonRollClassifier.from_argparse_args(args)
 
     trainer = pl.Trainer(max_epochs=30,
-                         gpus=[0, 1],
+                         gpus=[0],
                          strategy=DDPPlugin(find_unused_parameters=False),
                          callbacks=[LearningRateMonitor(), WandbImagePredCallback(num_samples=32)],
                          enable_checkpointing=True,

@@ -285,9 +285,10 @@ class HorizonMarkupTool:
 
         with open('data/horizon/lines.json', 'w') as f:
             flat_dict = {}
-            for key, value in self.lines.populated().items():
-                lines = [l.flat for l in value if isinstance(l, Line)]
-                flat_dict[str(key)] = lines
+            for key in self.lines.frames:
+                lines = [l.flat for l in self.get_lines(key)]
+                if len(lines) > 0:
+                    flat_dict[str(key)] = lines
             s = json.dumps(flat_dict)
             f.write(s)
 
