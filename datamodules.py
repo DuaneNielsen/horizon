@@ -1,11 +1,10 @@
 from pytorch_lightning import LightningDataModule
 from pytorch_lightning.utilities.types import TRAIN_DATALOADERS, EVAL_DATALOADERS
-from flash import DataKeys
 from torch.utils.data import random_split, dataloader
 from markup_video import Line
 import numpy as np
 from torchvision.io import read_image
-from torchvision.transforms.functional import rotate, resize
+from torchvision.transforms.functional import rotate, resize, crop
 from math import ceil, degrees
 import torch
 import json
@@ -26,19 +25,32 @@ class HorizonDataSet:
         return len(self.lines)
 
     def __getitem__(self, item):
+
+        img = read_image(f'{self.data_dir}/{self.index[item]}.png')
+
+        # resize
+        h = 64
+        orig_h, orig_w = img.shape[1], img.shape[2]
+        rescale_x_factor = orig_h/orig_w
+        scale = orig_h / h
+        img = resize(img, [h, h])
+
+        # mask
+        x = torch.linspace(-h//2, h//2, h)
+        x, y = torch.meshgrid([x, x])
+        d = torch.sqrt(x ** 2 + y ** 2)
+        mask = d < h//2
+
         # load the serialized form into a numpy array
         lines = np.stack([Line.from_flat(line).to_numpy() for line in self.lines[self.index[item]]], axis=-1)
+        lines[0, :, :] = lines[0, :, :] * rescale_x_factor
+        lines[:, :, :] = lines[:, :, :] / scale
 
         # compute l2 norm for each line ( rise - run in normal form ), then convert to complex plane, and angle
         slope = (lines[:, 1, :] - lines[:, 0, :])
         length = np.linalg.norm(slope, ord=2, axis=0, keepdims=True)
         complex = (slope / length).T.copy().view(np.complex128)
         angle = np.angle(complex.mean())
-        img = read_image(f'{self.data_dir}/{self.index[item]}.png')
-
-        # resize
-        resize_shape = [img.shape[1] // 4, img.shape[2] // 4]
-        img = resize(img, resize_shape)
 
         # data augmentation - rotate
         if self.rotate:
@@ -47,19 +59,18 @@ class HorizonDataSet:
             angle = angle - d_angle
             angle = (angle + 2 * np.pi) % (2 * np.pi)
 
+        img = img * mask.unsqueeze(0)
+
         # calculate class
         slise_size = self.bins / (2 * np.pi)
         discrete = int(np.floor(angle * slise_size))
 
         labels = {
-            ''
             'lines': lines,
             'complex': complex,
             'angle': angle,
             'discrete': discrete
         }
-
-        #img = img.type(torch.float32)
 
         if self.select_label is not None:
             return img.float(), labels[self.select_label]

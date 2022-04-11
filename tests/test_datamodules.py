@@ -77,7 +77,7 @@ def test_horizon_dataset_visually():
 
         ax.plot(horizon[0], horizon[1], color='white', linewidth='4')
 
-        ax.imshow(img.permute(1, 2, 0))
+        ax.imshow(img.permute(1, 2, 0).byte())
 
         plt.pause(5.0)
 
@@ -116,6 +116,6 @@ def test_horizon_dataset_visually_with_rotations():
 
         ax.plot(horizon[0], horizon[1], color='white', linewidth='4')
 
-        ax.imshow(img.permute(1, 2, 0))
+        ax.imshow(img.permute(1, 2, 0).byte())
 
         plt.pause(5.0)
