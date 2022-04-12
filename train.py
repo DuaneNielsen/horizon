@@ -151,7 +151,6 @@ if __name__ == '__main__':
     model = HorizonRollClassifier.from_argparse_args(args)
     trainer = pl.Trainer.from_argparse_args(args,
                                             max_epochs=30,
-                                            gpus=[0, 1],
                                             strategy=DDPPlugin(find_unused_parameters=False),
                                             callbacks=[
                                                 LearningRateMonitor(),
