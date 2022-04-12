@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import datamodules
+import dataset
 
 N = 90
 bottom = 8
@@ -9,7 +9,7 @@ max_height = 4
 theta = np.linspace(-np.pi, np.pi, N, endpoint=False)
 radii = np.zeros_like(theta)
 
-for x, labels in datamodules.HorizonDataSet('../data/horizon'):
+for x, labels in dataset.HorizonDataSet('../data/horizon'):
     d = theta - labels['angle']
     d = np.abs(d)
     cls = np.nanargmin(d)
