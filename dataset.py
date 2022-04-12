@@ -1,6 +1,3 @@
-from pytorch_lightning import LightningDataModule
-from pytorch_lightning.utilities.types import TRAIN_DATALOADERS, EVAL_DATALOADERS
-from torch.utils.data import random_split, dataloader
 from markup_video import Line
 import numpy as np
 from torchvision.io import read_image
@@ -11,15 +8,22 @@ import json
 
 
 class HorizonDataSet:
-    def __init__(self, data_dir='data/horizon', rotate=True, bins=360, select_label=None):
+    def __init__(self, data_dir='data/horizon', rotate=True, num_classes=16, select_label=None, image_size=32):
         self.data_dir = data_dir
+        self.rotate = rotate
+        self.bins = num_classes
+        self.select_label = select_label
+        self.image_size = image_size
+
         with open(f'{self.data_dir}/lines.json') as f:
             lines = json.loads(f.read())
         self.lines = lines
         self.index = list(lines)
-        self.rotate = rotate
-        self.bins = bins
-        self.select_label = select_label
+
+        # mask
+        x = torch.linspace(-self.image_size//2, self.image_size//2, self.image_size)
+        x, y = torch.meshgrid([x, x], indexing='ij')
+        self.mask = torch.sqrt(x ** 2 + y ** 2).lt(self.image_size//2)
 
     def __len__(self):
         return len(self.lines)
@@ -29,17 +33,11 @@ class HorizonDataSet:
         img = read_image(f'{self.data_dir}/{self.index[item]}.png')
 
         # resize
-        h = 64
+        h = self.image_size
         orig_h, orig_w = img.shape[1], img.shape[2]
         rescale_x_factor = orig_h/orig_w
         scale = orig_h / h
         img = resize(img, [h, h])
-
-        # mask
-        x = torch.linspace(-h//2, h//2, h)
-        x, y = torch.meshgrid([x, x])
-        d = torch.sqrt(x ** 2 + y ** 2)
-        mask = d < h//2
 
         # load the serialized form into a numpy array
         lines = np.stack([Line.from_flat(line).to_numpy() for line in self.lines[self.index[item]]], axis=-1)
@@ -59,7 +57,7 @@ class HorizonDataSet:
             angle = angle - d_angle
             angle = (angle + 2 * np.pi) % (2 * np.pi)
 
-        img = img * mask.unsqueeze(0)
+        img = img * self.mask.unsqueeze(0)
 
         # calculate class
         slise_size = self.bins / (2 * np.pi)
@@ -76,33 +74,3 @@ class HorizonDataSet:
             return img.float(), labels[self.select_label]
         else:
             return img.float(), labels
-
-
-class HorizonAnglesDataModule(LightningDataModule):
-    def __init__(self, data_dir, batch_size, num_classes=90, num_workers=0):
-        super().__init__()
-        self.data_dir = data_dir
-        self.batch_size = batch_size
-        self.num_workers = num_workers
-        self.num_classes = num_classes
-        self.train = None
-        self.val = None
-        self.setup()
-
-    def setup(self, stage=None):
-        full = HorizonDataSet(self.data_dir, select_label='discrete', bins=90)
-        train_size, val_size = len(full) * 9 // 10, ceil(len(full) / 10)
-        self.train, self.val = random_split(full, [train_size, val_size])
-
-    def test_dataloader(self) -> EVAL_DATALOADERS:
-        pass
-
-    def val_dataloader(self) -> EVAL_DATALOADERS:
-        return dataloader.DataLoader(self.val, batch_size=self.batch_size, num_workers=self.num_workers)
-
-    def predict_dataloader(self) -> EVAL_DATALOADERS:
-        pass
-
-    def train_dataloader(self) -> TRAIN_DATALOADERS:
-        return dataloader.DataLoader(self.train, batch_size=self.batch_size, num_workers=self.num_workers)
-

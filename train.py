@@ -6,9 +6,13 @@ from pytorch_lightning.plugins import DDPPlugin
 from pytorch_lightning.loggers import WandbLogger
 import torchmetrics
 import wandb
-from argparse import ArgumentParser, Namespace
-import datamodules
+from argparse import ArgumentParser
+from dataset import HorizonDataSet
 from pytorch_lightning.utilities import argparse as pl_argparse
+import timm
+from pytorch_lightning.utilities.types import TRAIN_DATALOADERS, EVAL_DATALOADERS
+from torch.utils.data import random_split, dataloader
+from math import ceil
 
 
 class WandbImagePredCallback(pl.Callback):
@@ -20,7 +24,7 @@ class WandbImagePredCallback(pl.Callback):
         self.num_samples = num_samples
 
     def on_validation_epoch_end(self, trainer, pl_module):
-        val_loader = trainer.datamodule.val_dataloader()
+        val_loader = pl_module.val_dataloader()
         val_data = []
         for i in range(self.num_samples):
             val_data += [val_loader.dataset[i]]
@@ -40,12 +44,23 @@ class WandbImagePredCallback(pl.Callback):
 
 class HorizonRollClassifier(pl.LightningModule):
 
-    def __init__(self, model: str, lr: float = 1e-4):
+    def __init__(self, model_str: str, data_dir: str, lr: float = 1e-4, batch_size: int = 8,
+                 select_label: str = 'discrete',
+                 num_classes: int = 16, num_workers: int = 0, image_size: int = 64, rotate: bool = True):
         super().__init__()
         self.save_hyperparameters()
-        self.model = torch.hub.load('rwightman/gen-efficientnet-pytorch', 'efficientnet_b0')
+
         self.train_acc = torchmetrics.Accuracy()
         self.val_acc = torchmetrics.Accuracy()
+
+        # init args
+        self.dataset_kwargs = {'data_dir': data_dir, 'rotate': rotate, 'num_classes': num_classes,
+                               'select_label': select_label, 'image_size': image_size}
+
+        self.dataloader_kwargs = {'batch_size': batch_size, 'num_workers': num_workers}
+        self.model = timm.create_model(self.hparams.model_str, num_classes=num_classes)
+        self.train_set = None
+        self.val_set = None
 
     @classmethod
     def from_argparse_args(cls, args):
@@ -59,8 +74,13 @@ class HorizonRollClassifier(pl.LightningModule):
         for name, tipe, default in pl_argparse.get_init_arguments_and_types(cls):
             parser.add_argument(f'--{name}', type=tipe[0], default=default)
 
+    def setup(self, stage=None):
+        full = HorizonDataSet(**self.dataset_kwargs)
+        train_size, val_size = len(full) * 9 // 10, ceil(len(full) / 10)
+        self.train_set, self.val_set = random_split(full, [train_size, val_size])
+
     def forward(self, x):
-        return self.model.forward(x)
+        return torch.log_softmax(self.model.forward(x), dim=1)
 
     def cross_entropy_loss(self, logits, labels):
         return F.nll_loss(logits, labels)
@@ -71,13 +91,13 @@ class HorizonRollClassifier(pl.LightningModule):
         loss = self.cross_entropy_loss(logits, y)
 
         logs = {'train_loss': loss.item()}
-        return {'loss': loss, 'preds': logits, 'targets': y, 'log': logs}
+        return {'loss': loss, 'preds': logits.detach(), 'targets': y.detach(), 'log': logs}
 
     def validation_step(self, val_batch, batch_idx):
         x, y = val_batch
         logits = self.forward(x)
         loss = self.cross_entropy_loss(logits, y)
-        return {'val_loss': loss, 'preds': logits, 'targets': y}
+        return {'val_loss': loss, 'preds': logits.detach(), 'targets': y.detach()}
 
     def test_step(self, val_batch, batch_idx):
         x, y = val_batch
@@ -108,17 +128,17 @@ class HorizonRollClassifier(pl.LightningModule):
                         'name': 'expo_lr'}
         return [optimizer], [lr_scheduler]
 
-    def train_dataloader(self):
-        return super().train_dataloader()
+    def test_dataloader(self) -> EVAL_DATALOADERS:
+        pass
 
-    def val_dataloader(self):
-        return super().val_dataloader()
+    def val_dataloader(self) -> EVAL_DATALOADERS:
+        return dataloader.DataLoader(self.val_set, **self.dataloader_kwargs)
 
-    def test_dataloader(self):
-        return super().test_dataloader()
+    def predict_dataloader(self) -> EVAL_DATALOADERS:
+        pass
 
-    def predict_dataloader(self):
-        return super().predict_dataloader()
+    def train_dataloader(self) -> TRAIN_DATALOADERS:
+        return dataloader.DataLoader(self.train_set, **self.dataloader_kwargs)
 
 
 if __name__ == '__main__':
@@ -128,16 +148,17 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     wandb_logger = WandbLogger(project='horizon')
-    mnist = datamodules.HorizonAnglesDataModule(data_dir='./data/horizon',
-                                                batch_size=8, num_workers=0)
     model = HorizonRollClassifier.from_argparse_args(args)
+    trainer = pl.Trainer.from_argparse_args(args,
+                                            max_epochs=30,
+                                            gpus=[0, 1],
+                                            strategy=DDPPlugin(find_unused_parameters=False),
+                                            callbacks=[
+                                                LearningRateMonitor(),
+                                                WandbImagePredCallback(num_samples=32)
+                                            ],
+                                            enable_checkpointing=True,
+                                            default_root_dir='.',
+                                            logger=wandb_logger)
 
-    trainer = pl.Trainer(max_epochs=30,
-                         gpus=[0],
-                         strategy=DDPPlugin(find_unused_parameters=False),
-                         callbacks=[LearningRateMonitor(), WandbImagePredCallback(num_samples=32)],
-                         enable_checkpointing=True,
-                         default_root_dir='.',
-                         logger=wandb_logger)
-
-    trainer.fit(model, datamodule=mnist)
+    trainer.fit(model)

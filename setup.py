@@ -13,8 +13,8 @@ setup(name='horizon',
             'numpy',
             'torch',
             'torchvision',
-            'lightning-flash[image]',
             'pytorch-lightning',
-            'imageio'
+            'imageio',
+            'timm'
       ],
       zip_safe=False)

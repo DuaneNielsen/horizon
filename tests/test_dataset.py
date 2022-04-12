@@ -1,11 +1,11 @@
-import datamodules
+import dataset
 import numpy as np
 from matplotlib import pyplot as plt
 from time import sleep
 
 
 def test_horizon_dataset_geometry():
-    ds = datamodules.HorizonDataSet(data_dir='data/test_geometry')
+    ds = dataset.HorizonDataSet(data_dir='data/test_geometry')
     x, y = ds[0]
 
     line1 = np.array([
@@ -42,7 +42,7 @@ def test_horizon_dataset_geometry():
 def test_horizon_dataset_visually():
     fig, ax = plt.subplots()
     fig.canvas.draw()
-    ds = datamodules.HorizonDataSet(data_dir='data/test_visual', rotate=False)
+    ds = dataset.HorizonDataSet(data_dir='data/test_visual', rotate=False)
     for img, label in ds:
         ax.clear()
 
@@ -85,7 +85,7 @@ def test_horizon_dataset_visually():
 def test_horizon_dataset_visually_with_rotations():
     fig, ax = plt.subplots()
     fig.canvas.draw()
-    ds = datamodules.HorizonDataSet(data_dir='data/test_visual', rotate=True)
+    ds = dataset.HorizonDataSet(data_dir='data/test_visual', rotate=True)
     for img, label in ds:
         ax.clear()
 
