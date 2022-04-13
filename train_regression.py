@@ -12,7 +12,7 @@ from pytorch_lightning.utilities import argparse as pl_argparse
 import timm
 from pytorch_lightning.utilities.types import TRAIN_DATALOADERS, EVAL_DATALOADERS
 from torch.utils.data import random_split, dataloader
-from math import ceil
+from math import ceil, degrees
 
 
 class WandbImagePredCallback(pl.Callback):
@@ -31,34 +31,35 @@ class WandbImagePredCallback(pl.Callback):
         val_data = list(zip(*val_data))
         val_imgs = torch.stack(val_data[0]).to(device=pl_module.device)
         val_labels = torch.tensor(val_data[1]).to(device=pl_module.device)
-        logits = pl_module(val_imgs)
-        preds = torch.argmax(logits, 1)
+        preds = pl_module(val_imgs)
         trainer.logger.experiment.log({
             "val/examples": [
-                wandb.Image(x, caption=f"Pred:{pred}, Label:{y}")
+                wandb.Image(x,
+                            caption=f"Pred: {degrees(pred.angle().item()):.1f}\u00B0, "
+                                    f"Label: {degrees(y.angle().item()):.1f}\u00B0"
+                            )
                 for x, pred, y in zip(val_imgs, preds, val_labels)
             ],
             "global_step": trainer.global_step
         })
 
 
-class HorizonRollClassifier(pl.LightningModule):
+class HorizonRollRegression(pl.LightningModule):
 
-    def __init__(self, model_str: str, data_dir: str, lr: float = 1e-4, batch_size: int = 8,
-                 select_label: str = 'discrete',
-                 num_classes: int = 16, num_workers: int = 0, image_size: int = 64, rotate: bool = True):
+    def __init__(self, model_str: str, data_dir: str, lr: float = 1e-4, gamma: float = 0.99, batch_size: int = 8,
+                 select_label: str = 'complex_mean', num_workers: int = 0, image_size: int = 64, rotate: bool = True):
         super().__init__()
         self.save_hyperparameters()
 
-        self.train_acc = torchmetrics.Accuracy()
-        self.val_acc = torchmetrics.Accuracy()
+        self.train_acc = torchmetrics.MeanAbsoluteError()
+        self.val_acc = torchmetrics.MeanAbsoluteError()
 
         # init args
-        self.dataset_kwargs = {'data_dir': data_dir, 'rotate': rotate, 'num_classes': num_classes,
+        self.dataset_kwargs = {'data_dir': data_dir, 'rotate': rotate, 'num_classes': 2,
                                'select_label': select_label, 'image_size': image_size}
 
         self.dataloader_kwargs = {'batch_size': batch_size, 'num_workers': num_workers}
-        self.model = timm.create_model(self.hparams.model_str, num_classes=num_classes)
+        self.model = timm.create_model(self.hparams.model_str, num_classes=2)
         self.train_set = None
         self.val_set = None
 
@@ -80,36 +81,37 @@ class HorizonRollClassifier(pl.LightningModule):
         self.train_set, self.val_set = random_split(full, [train_size, val_size])
 
     def forward(self, x):
-        return torch.log_softmax(self.model.forward(x), dim=1)
+        out = torch.view_as_complex(self.model.forward(x))
+        return (out / out.abs()).unsqueeze(1)
 
-    def cross_entropy_loss(self, logits, labels):
-        return F.nll_loss(logits, labels)
+    def abs_loss(self, pred, target):
+        return (pred - target).abs().pow(2).mean()
 
     def training_step(self, train_batch, batch_idx):
         x, y = train_batch
-        logits = self.forward(x)
-        loss = self.cross_entropy_loss(logits, y)
+        pred = self.forward(x)
+        loss = self.abs_loss(pred, y)
 
         logs = {'train_loss': loss.item()}
-        return {'loss': loss, 'preds': logits.detach(), 'targets': y.detach(), 'log': logs}
+        return {'loss': loss, 'preds': pred.detach(), 'targets': y.detach(), 'log': logs}
 
     def validation_step(self, val_batch, batch_idx):
         x, y = val_batch
-        logits = self.forward(x)
-        loss = self.cross_entropy_loss(logits, y)
-        return {'val_loss': loss, 'preds': logits.detach(), 'targets': y.detach()}
+        pred = self.forward(x)
+        loss = self.abs_loss(pred, y)
+        return {'val_loss': loss, 'preds': pred.detach(), 'targets': y.detach()}
 
     def test_step(self, val_batch, batch_idx):
         x, y = val_batch
         logits = self.forward(x)
-        loss = self.cross_entropy_loss(logits, y)
+        loss = self.abs_loss(logits, y)
         return {'test_loss': loss, 'preds': logits.detach(), 'targets': y.detach()}
 
     def training_step_end(self, outputs):
         self.train_acc(outputs['preds'], outputs['targets'])
 
     def training_epoch_end(self, outputs):
-        self.log("train/acc_epoch", self.train_acc)
+        self.log("train/abs_error_epoch (radians)", self.train_acc)
 
     def validation_step_end(self, outputs):
         self.val_acc(outputs['preds'], outputs['targets'])
@@ -117,7 +119,7 @@ class HorizonRollClassifier(pl.LightningModule):
     def validation_epoch_end(self, outputs):
         avg_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
         tensorboard_logs = {'val_loss': avg_loss}
-        self.log('val/vacc_epoch', self.val_acc)
+        self.log('val/abs_error_epoch (radians)', self.val_acc)
         return {'avg_val_loss': avg_loss, 'log': tensorboard_logs}
 
     def test_epoch_end(self, outputs):
@@ -127,7 +129,7 @@ class HorizonRollClassifier(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
-        lr_scheduler = {'scheduler': torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.95),
+        lr_scheduler = {'scheduler': torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=self.hparams.gamma),
                         'name': 'expo_lr'}
         return [optimizer], [lr_scheduler]
 
@@ -147,11 +149,11 @@ class HorizonRollClassifier(pl.LightningModule):
 if __name__ == '__main__':
     parser = ArgumentParser()
     pl.Trainer.add_argparse_args(parser)
-    HorizonRollClassifier.add_argparse_args(parser)
+    HorizonRollRegression.add_argparse_args(parser)
     args = parser.parse_args()
 
-    wandb_logger = WandbLogger(project='horizon')
-    model = HorizonRollClassifier.from_argparse_args(args)
+    wandb_logger = WandbLogger(project='horizon_regression')
+    model = HorizonRollRegression.from_argparse_args(args)
     trainer = pl.Trainer.from_argparse_args(args,
                                             strategy=DDPPlugin(find_unused_parameters=False),
                                             callbacks=[
