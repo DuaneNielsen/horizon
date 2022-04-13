@@ -40,7 +40,6 @@ class WandbImagePredCallback(pl.Callback):
                             )
                 for x, pred, y in zip(val_imgs, preds, val_labels)
             ],
-            "global_step": trainer.global_step
         })
 
 
@@ -51,8 +50,11 @@ class HorizonRollRegression(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters()
 
-        self.train_acc = torchmetrics.MeanAbsoluteError()
-        self.val_acc = torchmetrics.MeanAbsoluteError()
+        self.train_mae = torchmetrics.MeanAbsoluteError()
+        self.val_mae = torchmetrics.MeanAbsoluteError()
+
+        self.val_loss = torchmetrics.MeanMetric()
+        self.train_loss = torchmetrics.MeanMetric()
 
         # init args
         self.dataset_kwargs = {'data_dir': data_dir, 'rotate': rotate, 'num_classes': 2,
@@ -99,39 +101,42 @@ class HorizonRollRegression(pl.LightningModule):
         x, y = val_batch
         pred = self.forward(x)
         loss = self.abs_loss(pred, y)
-        return {'val_loss': loss, 'preds': pred.detach(), 'targets': y.detach()}
+
+        return {'loss': loss, 'preds': pred.detach(), 'targets': y.detach()}
 
     def test_step(self, val_batch, batch_idx):
-        x, y = val_batch
-        logits = self.forward(x)
-        loss = self.abs_loss(logits, y)
-        return {'test_loss': loss, 'preds': logits.detach(), 'targets': y.detach()}
+        pass
 
     def training_step_end(self, outputs):
-        self.train_acc(outputs['preds'], outputs['targets'])
+        self.train_mae(outputs['preds'].angle() * 180.0 / torch.pi, outputs['targets'].angle() * 180.0 / torch.pi)
+        self.train_loss(outputs['loss'])
 
     def training_epoch_end(self, outputs):
-        self.log("train/abs_error_epoch (radians)", self.train_acc)
+        self.log('train/loss', self.train_loss)
+        self.log("train/mean_abs_error_epoch (degrees)", self.train_mae)
 
     def validation_step_end(self, outputs):
-        self.val_acc(outputs['preds'], outputs['targets'])
+        self.val_mae(outputs['preds'].angle() * 180.0 / torch.pi, outputs['targets'].angle() * 180.0 / torch.pi)
+        self.val_loss(outputs['loss'])
 
     def validation_epoch_end(self, outputs):
-        avg_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
-        tensorboard_logs = {'val_loss': avg_loss}
-        self.log('val/abs_error_epoch (radians)', self.val_acc)
-        return {'avg_val_loss': avg_loss, 'log': tensorboard_logs}
+        self.log('val/val_loss', self.val_loss)
+        self.log('val/mean_abs_error_epoch (degrees)', self.val_mae)
+
+    def test_step_end(self, outputs):
+        pass
 
     def test_epoch_end(self, outputs):
-        avg_loss = torch.stack([x['test_loss'] for x in outputs]).mean()
-        tensorboard_logs = {'test_loss': avg_loss}
-        return {'avg_test_loss': avg_loss, 'log': tensorboard_logs}
+        pass
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
         lr_scheduler = {'scheduler': torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=self.hparams.gamma),
                         'name': 'expo_lr'}
         return [optimizer], [lr_scheduler]
+
+    def train_dataloader(self) -> TRAIN_DATALOADERS:
+        return dataloader.DataLoader(self.train_set, **self.dataloader_kwargs)
 
     def test_dataloader(self) -> EVAL_DATALOADERS:
         pass
@@ -142,14 +147,12 @@ class HorizonRollRegression(pl.LightningModule):
     def predict_dataloader(self) -> EVAL_DATALOADERS:
         pass
 
-    def train_dataloader(self) -> TRAIN_DATALOADERS:
-        return dataloader.DataLoader(self.train_set, **self.dataloader_kwargs)
-
 
 if __name__ == '__main__':
     parser = ArgumentParser()
     pl.Trainer.add_argparse_args(parser)
     HorizonRollRegression.add_argparse_args(parser)
+    parser.add_argument('--val_samples', type=int, default=16)
     args = parser.parse_args()
 
     wandb_logger = WandbLogger(project='horizon_regression')
@@ -158,7 +161,7 @@ if __name__ == '__main__':
                                             strategy=DDPPlugin(find_unused_parameters=False),
                                             callbacks=[
                                                 LearningRateMonitor(),
-                                                WandbImagePredCallback(num_samples=32)
+                                                WandbImagePredCallback(num_samples=args.val_samples)
                                             ],
                                             enable_checkpointing=True,
                                             default_root_dir='.',
