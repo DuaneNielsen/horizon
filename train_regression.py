@@ -1,11 +1,9 @@
 import torch
-import torch.nn.functional as F
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks import LearningRateMonitor
+from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from pytorch_lightning.plugins import DDPPlugin
 from pytorch_lightning.loggers import WandbLogger
 import torchmetrics
-import wandb
 from argparse import ArgumentParser
 from dataset import HorizonDataSet
 from pytorch_lightning.utilities import argparse as pl_argparse
@@ -13,6 +11,7 @@ import timm
 from pytorch_lightning.utilities.types import TRAIN_DATALOADERS, EVAL_DATALOADERS
 from torch.utils.data import random_split, dataloader
 from math import ceil, degrees
+import wandb
 
 
 class WandbImagePredCallback(pl.Callback):
@@ -120,8 +119,12 @@ class HorizonRollRegression(pl.LightningModule):
         self.val_loss(outputs['loss'])
 
     def validation_epoch_end(self, outputs):
-        self.log('val/val_loss', self.val_loss)
-        self.log('val/mean_abs_error_epoch (degrees)', self.val_mae)
+        log = {
+            'val/val_loss': self.val_loss,
+            'val/mean_abs_error_epoch (degrees)': self.val_mae
+        }
+        [self.log(k, v) for k, v in log.items()]
+        return log
 
     def test_step_end(self, outputs):
         pass
@@ -155,13 +158,19 @@ if __name__ == '__main__':
     parser.add_argument('--val_samples', type=int, default=16)
     args = parser.parse_args()
 
+    pl.seed_everything(1234)
+
     wandb_logger = WandbLogger(project='horizon_regression')
+    checkpoint = ModelCheckpoint(dirpath=f"checkpoints/{wandb_logger.experiment.name}/",
+                                 save_top_k=2,
+                                 monitor="val/val_loss")
     model = HorizonRollRegression.from_argparse_args(args)
     trainer = pl.Trainer.from_argparse_args(args,
                                             strategy=DDPPlugin(find_unused_parameters=False),
                                             callbacks=[
                                                 LearningRateMonitor(),
-                                                WandbImagePredCallback(num_samples=args.val_samples)
+                                                WandbImagePredCallback(num_samples=args.val_samples),
+                                                checkpoint
                                             ],
                                             enable_checkpointing=True,
                                             default_root_dir='.',
