@@ -3,6 +3,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from time import sleep
 import torch
+import cv2
 
 
 def test_horizon_dataset_geometry():
@@ -72,7 +73,6 @@ def test_horizon_dataset_visually():
             [0, 0, 0.],
             [1., 1., 1.]
         ])
-
 
         angle = label['angle']
         r_angle = r_matrix(angle)
@@ -152,3 +152,18 @@ def test_horizon_dataset_visually_with_rotations():
         ax.imshow(img.permute(1, 2, 0).byte())
 
         plt.pause(5.0)
+
+
+def test_vidstream():
+    stream = dataset.video_stream('/home/duane/Downloads/drone_fpv1.mp4', image_size=64)
+
+    for img in stream:
+        for c in range(3):
+            img[c] = img[c] - img[c].min()
+            img[c] = img[c] * 256 / img[c].max()
+        img = img.permute(1, 2, 0).byte().numpy()
+        img = cv2.resize(img, (512, 512))
+        cv2.imshow('/home/duane/Downloads/drone_fpv1.mp4', cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+

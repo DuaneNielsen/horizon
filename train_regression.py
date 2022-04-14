@@ -5,7 +5,7 @@ from pytorch_lightning.plugins import DDPPlugin
 from pytorch_lightning.loggers import WandbLogger
 import torchmetrics
 from argparse import ArgumentParser
-from dataset import HorizonDataSet
+from dataset import HorizonDataSet, video_stream
 from pytorch_lightning.utilities import argparse as pl_argparse
 import timm
 from pytorch_lightning.utilities.types import TRAIN_DATALOADERS, EVAL_DATALOADERS
@@ -148,23 +148,19 @@ class HorizonRollRegression(pl.LightningModule):
         return dataloader.DataLoader(self.val_set, **self.dataloader_kwargs)
 
     def predict_dataloader(self) -> EVAL_DATALOADERS:
+        return dataloader.DataLoader(video_stream(self.dataset_kwargs['data_dir'], self.dataset_kwargs['image_size']))
+
+    def predict_step(self, batch, batch_idx, dataloader_idx):
         pass
 
 
-if __name__ == '__main__':
-    parser = ArgumentParser()
-    pl.Trainer.add_argparse_args(parser)
-    HorizonRollRegression.add_argparse_args(parser)
-    parser.add_argument('--val_samples', type=int, default=16)
-    args = parser.parse_args()
-
-    pl.seed_everything(1234)
-
-    wandb_logger = WandbLogger(project='horizon_regression')
+def train(args):
     checkpoint = ModelCheckpoint(dirpath=f"checkpoints/{wandb_logger.experiment.name}/",
                                  save_top_k=2,
                                  monitor="val/val_loss")
+
     model = HorizonRollRegression.from_argparse_args(args)
+
     trainer = pl.Trainer.from_argparse_args(args,
                                             strategy=DDPPlugin(find_unused_parameters=False),
                                             callbacks=[
@@ -176,4 +172,29 @@ if __name__ == '__main__':
                                             default_root_dir='.',
                                             logger=wandb_logger)
 
-    trainer.fit(model)
+    trainer.fit(model, ckpt_path=args.resume_training)
+
+
+def validate_checkpoint(args):
+    model = HorizonRollRegression.load_from_checkpoint(args.validate_checkpoint)
+    trainer = pl.Trainer(callbacks=WandbImagePredCallback(num_samples=32), logger=wandb_logger)
+    trainer.validate(model)
+
+
+if __name__ == '__main__':
+    parser = ArgumentParser()
+    pl.Trainer.add_argparse_args(parser)
+    HorizonRollRegression.add_argparse_args(parser)
+    parser.add_argument('--val_samples', type=int, default=16)
+    parser.add_argument('--resume_training', type=str, default=None)
+    parser.add_argument('--load_from_checkpoint', type=str, default=None)
+    parser.add_argument('--validate_checkpoint', type=str, default=None)
+    args = parser.parse_args()
+
+    pl.seed_everything(1234)
+    wandb_logger = WandbLogger(project='horizon_regression')
+
+    if args.validate_checkpoint is not None:
+        validate_checkpoint(args)
+    else:
+        train(args)
