@@ -1,10 +1,15 @@
 from markup_video import Line
 import numpy as np
-from torchvision.io import read_image
+from torchvision.io import read_image, VideoReader, read_video
 from torchvision.transforms.functional import rotate, resize, normalize
 from math import ceil, degrees
 import torch
 import json
+import imageio_ffmpeg
+import imageio
+
+rgb_mean = [95.1683, 99.7394, 98.8952]
+rgb_std = [47.6498, 46.6025, 51.7941]
 
 
 class HorizonDataSet:
@@ -38,7 +43,7 @@ class HorizonDataSet:
         rescale_x_factor = orig_h / orig_w
         scale = orig_h / h
         img = resize(img, [h, h])
-        img = normalize(img, [img[i].mean() for i in range(3)], [img[i].std() for i in range(3)], inplace=True)
+        img = normalize(img, rgb_mean, rgb_std, inplace=True)
 
         # load the serialized form into a numpy array
         lines = np.stack([Line.from_flat(line).to_numpy() for line in self.lines[self.index[item]]], axis=-1)
@@ -50,7 +55,7 @@ class HorizonDataSet:
         length = np.linalg.norm(slope, ord=2, axis=0, keepdims=True)
         complex = (slope / length).T.copy().view(np.complex128)
         complex_mean = complex.mean()
-        angle = np.angle(complex_mean)
+        angle = torch.tensor([np.angle(complex_mean)])
 
         # data augmentation - rotate
         if self.rotate:
@@ -81,3 +86,46 @@ class HorizonDataSet:
             return img, labels[self.select_label]
         else:
             return img, labels
+
+
+def video_stream(filepath, image_size):
+    reader = imageio_ffmpeg.read_frames(filepath)
+    frameinfo = next(reader)
+    w, h = frameinfo['size']
+    for frame in reader:
+        img = torch.frombuffer(frame[0:w * h * 3], dtype=torch.uint8)
+        img = img.reshape(h, w, 3).permute(2, 0, 1)
+        img = resize(img, [image_size, image_size]).float()
+        img = normalize(img, rgb_mean, rgb_std, inplace=True)
+        yield img
+
+
+if __name__ == '__main__':
+
+    """
+    run to compute the normalization values of the dataset
+    """
+
+    nimages = 0
+    mean = torch.zeros(3)
+    var = torch.zeros(3)
+
+    import pathlib
+    path = pathlib.Path('./data/horizon').glob('*.png')
+
+    for file in path:
+        img = read_image(str(file))
+        # Rearrange batch to be the shape of [C, W * H]
+        img = img.view(img.size(0), -1).float()
+        # Update total number of images
+        nimages += 1
+        # Compute mean and std here
+        mean += img.mean(1)
+        var += img.var(1)
+
+    mean /= nimages
+    var /= nimages
+    std = torch.sqrt(var)
+
+    print('mean', mean)
+    print('std', std)
