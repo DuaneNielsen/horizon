@@ -1,15 +1,28 @@
+from torch.utils.data.dataset import T_co
+
 from markup_video import Line
 import numpy as np
-from torchvision.io import read_image, VideoReader, read_video
+from torchvision.io import read_image
 from torchvision.transforms.functional import rotate, resize, normalize
-from math import ceil, degrees
+from math import degrees
 import torch
 import json
 import imageio_ffmpeg
-import imageio
+import torch.utils.data
+
 
 rgb_mean = [95.1683, 99.7394, 98.8952]
 rgb_std = [47.6498, 46.6025, 51.7941]
+
+
+def reverse_norm(img):
+    return img * torch.tensor(rgb_std).reshape(3, 1, 1) + torch.tensor(rgb_mean).reshape(3, 1, 1)
+
+
+def make_mask(image_size):
+    x = torch.linspace(-image_size // 2, image_size // 2, image_size)
+    x, y = torch.meshgrid([x, x], indexing='ij')
+    return torch.sqrt(x ** 2 + y ** 2).lt(image_size // 2)
 
 
 class HorizonDataSet:
@@ -26,9 +39,10 @@ class HorizonDataSet:
         self.index = list(lines)
 
         # mask
-        x = torch.linspace(-self.image_size // 2, self.image_size // 2, self.image_size)
-        x, y = torch.meshgrid([x, x], indexing='ij')
-        self.mask = torch.sqrt(x ** 2 + y ** 2).lt(self.image_size // 2)
+        # x = torch.linspace(-self.image_size // 2, self.image_size // 2, self.image_size)
+        # x, y = torch.meshgrid([x, x], indexing='ij')
+        # self.mask = torch.sqrt(x ** 2 + y ** 2).lt(self.image_size // 2)
+        self.mask = make_mask(image_size)
 
     def __len__(self):
         return len(self.lines)
@@ -88,16 +102,31 @@ class HorizonDataSet:
             return img, labels
 
 
-def video_stream(filepath, image_size):
-    reader = imageio_ffmpeg.read_frames(filepath)
+def video_stream(data_dir, image_size):
+    reader = imageio_ffmpeg.read_frames(f'{data_dir}/video.mp4')
     frameinfo = next(reader)
     w, h = frameinfo['size']
+    mask = make_mask(image_size)
     for frame in reader:
         img = torch.frombuffer(frame[0:w * h * 3], dtype=torch.uint8)
         img = img.reshape(h, w, 3).permute(2, 0, 1)
         img = resize(img, [image_size, image_size]).float()
         img = normalize(img, rgb_mean, rgb_std, inplace=True)
+        #img = img * mask
         yield img
+
+
+class HorizonVideoDataset(torch.utils.data.IterableDataset):
+    def __getitem__(self, index) -> T_co:
+        pass
+
+    def __init__(self, data_dir, image_size):
+        super().__init__()
+        self.data_dir = data_dir
+        self.image_size = image_size
+
+    def __iter__(self):
+        return video_stream(self.data_dir, self.image_size)
 
 
 if __name__ == '__main__':
@@ -111,6 +140,7 @@ if __name__ == '__main__':
     var = torch.zeros(3)
 
     import pathlib
+
     path = pathlib.Path('./data/horizon').glob('*.png')
 
     for file in path:

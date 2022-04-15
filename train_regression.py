@@ -1,17 +1,25 @@
+from typing import Optional, Any
+from math import ceil, floor, degrees
+from argparse import ArgumentParser
+
 import torch
+from torch.utils.data import random_split, dataloader
+from torchvision.transforms.functional import to_pil_image
+import torchmetrics
+
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from pytorch_lightning.plugins import DDPPlugin
 from pytorch_lightning.loggers import WandbLogger
-import torchmetrics
-from argparse import ArgumentParser
-from dataset import HorizonDataSet, video_stream
-from pytorch_lightning.utilities import argparse as pl_argparse
-import timm
 from pytorch_lightning.utilities.types import TRAIN_DATALOADERS, EVAL_DATALOADERS
-from torch.utils.data import random_split, dataloader
-from math import ceil, degrees
+from pytorch_lightning.utilities import argparse as pl_argparse
+
+import timm
 import wandb
+from PIL import ImageDraw
+import cv2
+
+from dataset import HorizonDataSet, HorizonVideoDataset, reverse_norm
 
 
 class WandbImagePredCallback(pl.Callback):
@@ -31,9 +39,20 @@ class WandbImagePredCallback(pl.Callback):
         val_imgs = torch.stack(val_data[0]).to(device=pl_module.device)
         val_labels = torch.tensor(val_data[1]).to(device=pl_module.device)
         preds = pl_module(val_imgs)
+
+        def draw_horizon(img, pred, label):
+            C, H, W = img.shape
+            c_x, c_y = W // 2, H // 2
+            img = reverse_norm(img).byte()
+            img = to_pil_image(img)
+            img1 = ImageDraw.Draw(img)
+            img1.line([(c_x, c_y), (pred.real * c_x + c_x, pred.imag * c_y + c_y)], fill="red", width=1)
+            img1.line([(c_x, c_y), (label.real * c_x + c_x, label.imag * c_y + c_y)], fill="blue", width=1)
+            return img
+
         trainer.logger.experiment.log({
             "val/examples": [
-                wandb.Image(x,
+                wandb.Image(draw_horizon(x, pred, y),
                             caption=f"Pred: {degrees(pred.angle().item()):.1f}\u00B0, "
                                     f"Label: {degrees(y.angle().item()):.1f}\u00B0"
                             )
@@ -148,10 +167,23 @@ class HorizonRollRegression(pl.LightningModule):
         return dataloader.DataLoader(self.val_set, **self.dataloader_kwargs)
 
     def predict_dataloader(self) -> EVAL_DATALOADERS:
-        return dataloader.DataLoader(video_stream(self.dataset_kwargs['data_dir'], self.dataset_kwargs['image_size']))
+        return dataloader.DataLoader(HorizonVideoDataset(self.dataset_kwargs['data_dir'],
+                                                         self.dataset_kwargs['image_size']))
 
-    def predict_step(self, batch, batch_idx, dataloader_idx):
-        pass
+    def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: Optional[int] = None) -> Any:
+        predict = self.forward(batch)
+        return {'predict': predict }
+
+    def on_predict_batch_end(self, outputs: Optional[Any], batch: Any, batch_idx: int, dataloader_idx: int) -> None:
+        pred = outputs['predict'].squeeze()
+        img = reverse_norm(batch.squeeze())
+        img = img.permute(1, 2, 0).byte().numpy()
+        img = cv2.resize(img, (512, 512))
+        x, y = floor(pred.real.item() * 256 + 256), floor(pred.imag.item() * 256 + 256)
+        img = cv2.line(img, pt1=(256, 256), pt2=(x, y), color=(0, 0, 255), thickness=3)
+        cv2.imshow('inference', cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            exit()
 
 
 def train(args):
@@ -181,6 +213,12 @@ def validate_checkpoint(args):
     trainer.validate(model)
 
 
+def predict_checkpoint(args):
+    model = HorizonRollRegression.load_from_checkpoint(args.predict_checkpoint)
+    trainer = pl.Trainer()
+    trainer.predict(model)
+
+
 if __name__ == '__main__':
     parser = ArgumentParser()
     pl.Trainer.add_argparse_args(parser)
@@ -189,6 +227,7 @@ if __name__ == '__main__':
     parser.add_argument('--resume_training', type=str, default=None)
     parser.add_argument('--load_from_checkpoint', type=str, default=None)
     parser.add_argument('--validate_checkpoint', type=str, default=None)
+    parser.add_argument('--predict_checkpoint', type=str, default=None)
     args = parser.parse_args()
 
     pl.seed_everything(1234)
@@ -196,5 +235,7 @@ if __name__ == '__main__':
 
     if args.validate_checkpoint is not None:
         validate_checkpoint(args)
+    if args.predict_checkpoint is not None:
+        predict_checkpoint(args)
     else:
         train(args)

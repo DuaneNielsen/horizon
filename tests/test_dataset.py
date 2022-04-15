@@ -97,9 +97,7 @@ def test_horizon_dataset_visually():
         ax.plot(discrete_min[0], discrete_min[1], color='blue', linewidth='2')
         ax.plot(discrete_max[0], discrete_max[1], color='red', linewidth='2')
 
-        for c in range(3):
-            img[c] = img[c] - img[c].min()
-            img[c] = img[c] * 256 / img[c].max()
+        img = dataset.reverse_norm(img)
 
         ax.imshow(img.permute(1, 2, 0).byte())
 
@@ -145,24 +143,21 @@ def test_horizon_dataset_visually_with_rotations():
                 [center_h, complex_mean.imag * center_h + center_h],
                 color='green', linewidth='2')
 
-        for c in range(3):
-            img[c] = img[c] - img[c].min()
-            img[c] = img[c] * 256 / img[c].max()
-
+        img = dataset.reverse_norm(img)
         ax.imshow(img.permute(1, 2, 0).byte())
 
         plt.pause(5.0)
 
 
 def test_vidstream():
-    stream = dataset.video_stream('/home/duane/Downloads/drone_fpv1.mp4', image_size=64)
+    stream = dataset.video_stream('../data/horizon', image_size=64)
 
     for img in stream:
-        for c in range(3):
-            img[c] = img[c] - img[c].min()
-            img[c] = img[c] * 256 / img[c].max()
+        img = dataset.reverse_norm(img)
         img = img.permute(1, 2, 0).byte().numpy()
         img = cv2.resize(img, (512, 512))
+        img = cv2.line(img, pt1=(256, 256), pt2=(512, 256), color=(0, 0, 255), thickness=3)
+        img = cv2.line(img, pt1=(256, 256), pt2=(256, 512), color=(0, 255, 0), thickness=3)
         cv2.imshow('/home/duane/Downloads/drone_fpv1.mp4', cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
