@@ -107,7 +107,7 @@ def test_horizon_dataset_visually():
 def test_horizon_dataset_visually_with_rotations():
     fig, ax = plt.subplots()
     fig.canvas.draw()
-    ds = dataset.HorizonDataSet(data_dir='data/test_visual', rotate=True, image_size=64)
+    ds = dataset.HorizonDataSet(data_dir='data/test_visual', no_rotate=True, image_size=64)
     for img, label in ds:
         ax.clear()
 
@@ -150,7 +150,7 @@ def test_horizon_dataset_visually_with_rotations():
 
 
 def test_vidstream():
-    stream = dataset.video_stream('../data/horizon', image_size=64)
+    stream = dataset.video_stream('../data/horizon', image_size=64, no_mask=True)
 
     for img in stream:
         img = dataset.reverse_norm(img)

@@ -64,7 +64,8 @@ class WandbImagePredCallback(pl.Callback):
 class HorizonRollRegression(pl.LightningModule):
 
     def __init__(self, model_str: str, data_dir: str, lr: float = 1e-4, gamma: float = 0.99, batch_size: int = 8,
-                 select_label: str = 'complex_mean', num_workers: int = 0, image_size: int = 64, rotate: bool = True):
+                 select_label: str = 'complex_mean', num_workers: int = 0, image_size: int = 64,
+                 no_rotate: bool = False, no_mask: bool = False):
         super().__init__()
         self.save_hyperparameters()
 
@@ -75,8 +76,8 @@ class HorizonRollRegression(pl.LightningModule):
         self.train_loss = torchmetrics.MeanMetric()
 
         # init args
-        self.dataset_kwargs = {'data_dir': data_dir, 'rotate': rotate, 'num_classes': 2,
-                               'select_label': select_label, 'image_size': image_size}
+        self.dataset_kwargs = {'data_dir': data_dir, 'no_rotate': no_rotate, 'num_classes': 2,
+                               'select_label': select_label, 'image_size': image_size, 'no_mask': no_mask}
 
         self.dataloader_kwargs = {'batch_size': batch_size, 'num_workers': num_workers}
         self.model = timm.create_model(self.hparams.model_str, num_classes=2)
@@ -93,7 +94,10 @@ class HorizonRollRegression(pl.LightningModule):
     @classmethod
     def add_argparse_args(cls, parser):
         for name, tipe, default in pl_argparse.get_init_arguments_and_types(cls):
-            parser.add_argument(f'--{name}', type=tipe[0], default=default)
+            if tipe[0] == bool:
+                parser.add_argument(f'--{name}', action='store_true')
+            else:
+                parser.add_argument(f'--{name}', type=tipe[0], default=default)
 
     def setup(self, stage=None):
         full = HorizonDataSet(**self.dataset_kwargs)
@@ -167,8 +171,7 @@ class HorizonRollRegression(pl.LightningModule):
         return dataloader.DataLoader(self.val_set, **self.dataloader_kwargs)
 
     def predict_dataloader(self) -> EVAL_DATALOADERS:
-        return dataloader.DataLoader(HorizonVideoDataset(self.dataset_kwargs['data_dir'],
-                                                         self.dataset_kwargs['image_size']))
+        return dataloader.DataLoader(HorizonVideoDataset(**self.dataset_kwargs))
 
     def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: Optional[int] = None) -> Any:
         predict = self.forward(batch)
@@ -214,7 +217,7 @@ def validate_checkpoint(args):
 
 
 def predict_checkpoint(args):
-    model = HorizonRollRegression.load_from_checkpoint(args.predict_checkpoint)
+    model = HorizonRollRegression.load_from_checkpoint(args.predict_checkpoint, no_mask=args.no_mask)
     trainer = pl.Trainer()
     trainer.predict(model)
 

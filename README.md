@@ -19,3 +19,9 @@ Re-run validation on a checkpoint
 ```bash
 python train_regression.py --validate_checkpoint checkpoints/crimson-sea-41/epoch\=746-step\=33614.ckpt
 ```
+
+Run inference on video stream
+
+```bash
+python train_regression.py --predict_checkpoint checkpoints/crimson-sea-41/epoch=836-step=37664.ckpt  --gpu 0, --no_mask 
+```

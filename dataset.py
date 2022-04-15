@@ -26,9 +26,9 @@ def make_mask(image_size):
 
 
 class HorizonDataSet:
-    def __init__(self, data_dir='data/horizon', rotate=True, num_classes=16, select_label=None, image_size=32):
+    def __init__(self, data_dir='data/horizon', num_classes=16, select_label=None, image_size=32, no_mask=False, no_rotate=False):
         self.data_dir = data_dir
-        self.rotate = rotate
+        self.rotate = ~no_rotate
         self.bins = num_classes
         self.select_label = select_label
         self.image_size = image_size
@@ -37,11 +37,6 @@ class HorizonDataSet:
             lines = json.loads(f.read())
         self.lines = lines
         self.index = list(lines)
-
-        # mask
-        # x = torch.linspace(-self.image_size // 2, self.image_size // 2, self.image_size)
-        # x, y = torch.meshgrid([x, x], indexing='ij')
-        # self.mask = torch.sqrt(x ** 2 + y ** 2).lt(self.image_size // 2)
         self.mask = make_mask(image_size)
 
     def __len__(self):
@@ -57,6 +52,8 @@ class HorizonDataSet:
         rescale_x_factor = orig_h / orig_w
         scale = orig_h / h
         img = resize(img, [h, h])
+
+        # normalize
         img = normalize(img, rgb_mean, rgb_std, inplace=True)
 
         # load the serialized form into a numpy array
@@ -80,6 +77,7 @@ class HorizonDataSet:
 
         complex_mean = torch.complex(real=torch.cos(angle), imag=torch.sin(angle))
 
+        # mask the image so there are no edges
         img = img * self.mask.unsqueeze(0)
 
         # calculate class
@@ -102,31 +100,43 @@ class HorizonDataSet:
             return img, labels
 
 
-def video_stream(data_dir, image_size):
+def video_stream(data_dir, image_size, no_mask=False):
+
+    # read in the video stream
     reader = imageio_ffmpeg.read_frames(f'{data_dir}/video.mp4')
+
+    # first frame contains meta-info
     frameinfo = next(reader)
     w, h = frameinfo['size']
+
+    # mask to remove edges
     mask = make_mask(image_size)
+
+    # generate the stream
     for frame in reader:
         img = torch.frombuffer(frame[0:w * h * 3], dtype=torch.uint8)
         img = img.reshape(h, w, 3).permute(2, 0, 1)
         img = resize(img, [image_size, image_size]).float()
         img = normalize(img, rgb_mean, rgb_std, inplace=True)
-        #img = img * mask
+        if not no_mask:
+            img = img * mask
         yield img
 
 
 class HorizonVideoDataset(torch.utils.data.IterableDataset):
-    def __getitem__(self, index) -> T_co:
-        pass
-
-    def __init__(self, data_dir, image_size):
+    def __init__(self, data_dir='data/horizon', num_classes=16, select_label=None, image_size=32,
+                 no_mask=False, no_rotate=False):
         super().__init__()
         self.data_dir = data_dir
         self.image_size = image_size
+        self.no_mask = no_mask
 
     def __iter__(self):
-        return video_stream(self.data_dir, self.image_size)
+        return video_stream(self.data_dir, self.image_size, self.no_mask)
+
+    def __getitem__(self, index) -> T_co:
+        # no idea why pytorch needed this
+        pass
 
 
 if __name__ == '__main__':
