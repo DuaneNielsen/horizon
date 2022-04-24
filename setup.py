@@ -19,6 +19,9 @@ setup(name='horizon',
             'imageio_ffmpeg',
             'timm',
             'opencv-python',
-            'pillow'
+            'pillow',
+            'nvidia-pyindex',
+            'nvidia-tensorrt,'
+            'torch-tensorrt'
       ],
       zip_safe=False)

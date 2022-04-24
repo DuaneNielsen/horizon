@@ -25,3 +25,14 @@ Run inference on video stream
 ```bash
 python train_regression.py --predict_checkpoint checkpoints/crimson-sea-41/epoch=836-step=37664.ckpt  --gpu 0, --no_mask 
 ```
+
+## installing
+
+
+
+```bash
+pip3 install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu113
+
+
+pip3 install torch-tensorrt -f https://github.com/NVIDIA/Torch-TensorRT/releases
+```
