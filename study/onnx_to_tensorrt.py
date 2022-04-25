@@ -66,3 +66,5 @@ if __name__ == '__main__':
     # initialize TensorRT engine and parse ONNX model
     engine, context = build_engine('ImageClassifier.onnx')
 
+    with open("sample.engine", "wb") as f:
+            f.write(engine.serialize())
