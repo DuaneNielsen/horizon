@@ -11,3 +11,7 @@ you will need the rtp server
 ```
 sudo apt-get install libgstrtspserver-1.0
 ```
+
+also the python bindings will not be installed, install the python samples, they include instructions on how to install the python bindings
+
+https://github.com/NVIDIA-AI-IOT/deepstream_python_apps
