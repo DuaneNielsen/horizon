@@ -27,6 +27,10 @@ if __name__ == '__main__':
 
     pipeline = Gst.Pipeline()
 
+    """
+    make Elements
+    """
+
     filesrc = Gst.ElementFactory.make("filesrc", "filesrc")
     filesrc.set_property('location', args.input)
     pipeline.add(filesrc)
@@ -37,14 +41,6 @@ if __name__ == '__main__':
     avdec_h264 = Gst.ElementFactory.make("avdec_h264", "avdec_h264")
     pipeline.add(avdec_h264)
 
-    def demuxer_pad_added(demuxer, pad, avdec_h264):
-        # import pydevd_pycharm
-        # pydevd_pycharm.settrace()
-        if pad.name == 'video_0':
-            demuxer.link(avdec_h264)
-
-    qtdemux.connect("pad-added", demuxer_pad_added, avdec_h264)
-
     nvvideoconvert = Gst.ElementFactory.make("nvvideoconvert", "nvvideoconvert")
     pipeline.add(nvvideoconvert)
 
@@ -52,19 +48,42 @@ if __name__ == '__main__':
     pipeline.add(nveglglesssink)
 
     """
-    Link
+    Link Elements
     """
 
     filesrc.link(qtdemux)
+
+    def demuxer_pad_added(demuxer, pad, avdec_h264):
+
+        # comment out below to debug inside callbacks on pycharm
+        # import pydevd_pycharm
+        # pydevd_pycharm.settrace()
+
+        if pad.name == 'video_0':
+            demuxer.link(avdec_h264)
+
+    # dynamic linking is required for demux
+    qtdemux.connect("pad-added", demuxer_pad_added, avdec_h264)
+
     avdec_h264.link(nvvideoconvert)
     nvvideoconvert.link(nveglglesssink)
 
+    """
+    Main loop
+    """
+
     loop = GObject.MainLoop()
+
+    # handle window close event
+    bus = pipeline.get_bus()
+    bus.add_signal_watch()
+
+    def on_message(bus, message, loop):
+        if message.type == Gst.MessageType.ERROR:
+            loop.quit()
+
+    bus.connect('message', on_message, loop)
+
     pipeline.set_state(Gst.State.PLAYING)
-
-    try:
-        loop.run()
-    except:
-        pass
-
+    loop.run()
     pipeline.set_state(Gst.State.NULL)
