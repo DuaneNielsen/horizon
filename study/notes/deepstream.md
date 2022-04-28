@@ -29,7 +29,7 @@ command line to test loading files...
 
 ```
 gst-launch-1.0 filesrc location=${FILE} ! h264parse ! decodebin ! videoconvert ! autovideosink
-
+```
 
 the below will need to be in your .bashrc
 
