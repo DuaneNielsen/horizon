@@ -47,3 +47,8 @@ COMPLETE_TOKENS='nveglglessink nvdsanalytics nvinferbin nvinferserverbin nvosdbi
 complete -W '${COMPLETE_TOKENS}' gst-launch-1.0
 complete -W '${COMPLETE_TOKENS}' gst-inspect-1.0
 ```
+
+and this will help you keep completion up to date
+```bash
+gst-inspect-1.0 | grep ^nv | cut -f3 -d' ' | cut -f1 -d: > complete
+```
