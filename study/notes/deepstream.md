@@ -29,4 +29,21 @@ command line to test loading files...
 
 ```
 gst-launch-1.0 filesrc location=${FILE} ! h264parse ! decodebin ! videoconvert ! autovideosink
+
+
+the below will need to be in your .bashrc
+
+``````
+export PATH=/usr/local/cuda-11.4/bin:$PATH
+export LD_LIBRARY_PATH=/usr/local/cuda-11.4/lib64:/usr/local/lib/gstreamer-1.0:$LD_LIBRARY_PATH
+export LD_RUN_PATH=/usr/local/lib/gstreamer-1.0:$LD_RUN_PATH
+
+```
+
+and you will probably find some completion helpful too
+
+```
+COMPLETE_TOKENS='nveglglessink nvdsanalytics nvinferbin nvinferserverbin nvosdbin nvdewarperbin nvtilerbin nvtrackerbin nvurisrcbin nvcamerasrcbin nvanalyticsbin nvvideorenderersinkbin nvvideoencfilesinkbin nvrtspoutsinkbin nvmsgbrokersinkbin nvdsbuffersyncbin nvdsasr dsexample nvmultistreamtiler nvmsgconv nvstreammux nvstreamdemux nvv4l2decoder nvv4l2h264enc nvv4l2h265enc nvdspreprocess nvblender nvsegvisual nvinferaudio nvjpegdec nvinfer nvvideoconvert nvdewarper nvmsgbroker nvof nvdsosd nvofvisual nvtracker nvdslogger nvdsvideotemplate nvds_text_to_speech nvdsaudiotemplate uridecodebin'
+complete -W '${COMPLETE_TOKENS}' gst-launch-1.0
+complete -W '${COMPLETE_TOKENS}' gst-inspect-1.0
 ```
