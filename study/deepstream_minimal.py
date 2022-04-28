@@ -80,7 +80,8 @@ if __name__ == '__main__':
 
     def on_message(bus, message, loop):
         if message.type == Gst.MessageType.ERROR:
-            loop.quit()
+            if message.parse_error()[0].message == 'Output window was closed':
+                loop.quit()
 
     bus.connect('message', on_message, loop)
 
