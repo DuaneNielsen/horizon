@@ -33,7 +33,7 @@ gst-launch-1.0 filesrc location=${FILE} ! h264parse ! decodebin ! videoconvert !
 
 the below will need to be in your .bashrc
 
-``````
+```
 export PATH=/usr/local/cuda-11.4/bin:$PATH
 export LD_LIBRARY_PATH=/usr/local/cuda-11.4/lib64:/usr/local/lib/gstreamer-1.0:$LD_LIBRARY_PATH
 export LD_RUN_PATH=/usr/local/lib/gstreamer-1.0:$LD_RUN_PATH
