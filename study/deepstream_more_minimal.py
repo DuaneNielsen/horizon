@@ -52,10 +52,9 @@ if __name__ == '__main__':
 
         caps = pad.get_current_caps()
         gststruct = caps.get_structure(0)
-        gstname = gststruct.get_name()
         features = caps.get_features(0)
 
-        if "video" in gstname:
+        if "video" in gststruct.get_name():
             if features.contains("memory:NVMM"):
                 uridecodebin.link(nvvideoconvert)
 
@@ -79,6 +78,7 @@ if __name__ == '__main__':
 
     bus.connect('message', on_message, loop)
 
+    # start the pipeline
     pipeline.set_state(Gst.State.PLAYING)
     loop.run()
     pipeline.set_state(Gst.State.NULL)
