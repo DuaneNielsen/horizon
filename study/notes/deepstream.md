@@ -44,7 +44,7 @@ if so, put below in .bashrc
 
 ```
 NVDS_TOKENS=`gst-inspect-1.0 | grep ^nv | cut -f3 -d' ' | cut -f1 -d: | xargs`
-GST_TOKENS='uridecode'
+GST_TOKENS='uridecodebin'
 COMPLETE_TOKENS="${GST_TOKENS} ${NVDS_TOKENS}"
 complete -W '${COMPLETE_TOKENS}' gst-launch-1.0
 complete -W '${COMPLETE_TOKENS}' gst-inspect-1.0
