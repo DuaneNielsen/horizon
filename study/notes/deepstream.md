@@ -37,7 +37,6 @@ the below will need to be in your .bashrc
 export PATH=/usr/local/cuda-11.4/bin:$PATH
 export LD_LIBRARY_PATH=/usr/local/cuda-11.4/lib64:/usr/local/lib/gstreamer-1.0:$LD_LIBRARY_PATH
 export LD_RUN_PATH=/usr/local/lib/gstreamer-1.0:$LD_RUN_PATH
-
 ```
 
 and you will probably find some completion helpful too
@@ -47,7 +46,6 @@ if so, put below in .bashrc
 NVDS_TOKENS=`gst-inspect-1.0 | grep ^nv | cut -f3 -d' ' | cut -f1 -d: | xargs`
 GST_TOKENS='uridecode'
 COMPLETE_TOKENS="${GST_TOKENS} ${NVDS_TOKENS}"
-echo $COMPLETE_TOKENS
 complete -W '${COMPLETE_TOKENS}' gst-launch-1.0
 complete -W '${COMPLETE_TOKENS}' gst-inspect-1.0
 ```
