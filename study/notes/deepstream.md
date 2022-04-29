@@ -41,14 +41,13 @@ export LD_RUN_PATH=/usr/local/lib/gstreamer-1.0:$LD_RUN_PATH
 ```
 
 and you will probably find some completion helpful too
+if so, put below in .bashrc
 
 ```
-COMPLETE_TOKENS='nveglglessink nvdsanalytics nvinferbin nvinferserverbin nvosdbin nvdewarperbin nvtilerbin nvtrackerbin nvurisrcbin nvcamerasrcbin nvanalyticsbin nvvideorenderersinkbin nvvideoencfilesinkbin nvrtspoutsinkbin nvmsgbrokersinkbin nvdsbuffersyncbin nvdsasr dsexample nvmultistreamtiler nvmsgconv nvstreammux nvstreamdemux nvv4l2decoder nvv4l2h264enc nvv4l2h265enc nvdspreprocess nvblender nvsegvisual nvinferaudio nvjpegdec nvinfer nvvideoconvert nvdewarper nvmsgbroker nvof nvdsosd nvofvisual nvtracker nvdslogger nvdsvideotemplate nvds_text_to_speech nvdsaudiotemplate uridecodebin'
+NVDS_TOKENS=`gst-inspect-1.0 | grep ^nv | cut -f3 -d' ' | cut -f1 -d: | xargs`
+GST_TOKENS='uridecode'
+COMPLETE_TOKENS="${GST_TOKENS} ${NVDS_TOKENS}"
+echo $COMPLETE_TOKENS
 complete -W '${COMPLETE_TOKENS}' gst-launch-1.0
 complete -W '${COMPLETE_TOKENS}' gst-inspect-1.0
-```
-
-and this will help you keep completion up to date
-```bash
-gst-inspect-1.0 | grep ^nv | cut -f3 -d' ' | cut -f1 -d: > complete
 ```
