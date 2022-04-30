@@ -11,8 +11,10 @@ GST_DEBUG=INFO deepstream_minimal.py --uri file:///opt/nvidia/deepstream/deepstr
 
 The equivalent pipeline is 
 
-GST_DEBUG=4 gst-launch-1.0 uridecodebin uri=file:///opt/nvidia/deepstream/deepstream/samples/streams/sample_1080p_h264.mp4 
-    ! nveglglessink
+gst-launch-1.0 uridecodebin uri=file:///opt/nvidia/deepstream/deepstream/samples/streams/sample_1080p_h264.mp4  \
+! m.sink_0 nvstreammux name=m width=1920 height=1080 batch-size=1 batched-push-timeout=4000000 \
+! nvinfer config-file-path=dstest1_pgie_config.txt \
+! nvvideoconvert ! nvosdbin ! nveglglessink
 
 """
 
