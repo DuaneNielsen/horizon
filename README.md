@@ -2,6 +2,11 @@
 
 Extracting information useful for UAV guidance from images.
 
+setup
+```commandline
+wandb login
+```
+
 Train the model
 
 ```bash

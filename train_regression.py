@@ -190,7 +190,7 @@ class HorizonRollRegression(pl.LightningModule):
 
 
 def train(args):
-    checkpoint = ModelCheckpoint(dirpath=f"checkpoints/{wandb_logger.experiment.name}/",
+    checkpoint = ModelCheckpoint(dirpath=f"checkpoints/regression/{wandb_logger.experiment.name}/",
                                  save_top_k=2,
                                  monitor="val/val_loss")
 

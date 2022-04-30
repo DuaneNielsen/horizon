@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks import LearningRateMonitor
+from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from pytorch_lightning.plugins import DDPPlugin
 from pytorch_lightning.loggers import WandbLogger
 import torchmetrics
@@ -46,7 +46,7 @@ class HorizonRollClassifier(pl.LightningModule):
 
     def __init__(self, model_str: str, data_dir: str, lr: float = 1e-4, batch_size: int = 8,
                  select_label: str = 'discrete',
-                 num_classes: int = 16, num_workers: int = 0, image_size: int = 64, rotate: bool = True):
+                 num_classes: int = 16, num_workers: int = 0, image_size: int = 64, no_rotate: bool = False, no_mask: bool = False):
         super().__init__()
         self.save_hyperparameters()
 
@@ -54,8 +54,8 @@ class HorizonRollClassifier(pl.LightningModule):
         self.val_acc = torchmetrics.Accuracy()
 
         # init args
-        self.dataset_kwargs = {'data_dir': data_dir, 'rotate': rotate, 'num_classes': num_classes,
-                               'select_label': select_label, 'image_size': image_size}
+        self.dataset_kwargs = {'data_dir': data_dir, 'no_rotate': no_rotate, 'no_mask': no_mask,
+                               'num_classes': num_classes, 'select_label': select_label, 'image_size': image_size}
 
         self.dataloader_kwargs = {'batch_size': batch_size, 'num_workers': num_workers}
         self.model = timm.create_model(self.hparams.model_str, num_classes=num_classes)
@@ -117,7 +117,7 @@ class HorizonRollClassifier(pl.LightningModule):
     def validation_epoch_end(self, outputs):
         avg_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
         tensorboard_logs = {'val_loss': avg_loss}
-        self.log('val/vacc_epoch', self.val_acc)
+        self.log('val/acc_epoch', self.val_acc)
         return {'avg_val_loss': avg_loss, 'log': tensorboard_logs}
 
     def test_epoch_end(self, outputs):
@@ -144,22 +144,57 @@ class HorizonRollClassifier(pl.LightningModule):
         return dataloader.DataLoader(self.train_set, **self.dataloader_kwargs)
 
 
-if __name__ == '__main__':
-    parser = ArgumentParser()
-    pl.Trainer.add_argparse_args(parser)
-    HorizonRollClassifier.add_argparse_args(parser)
-    args = parser.parse_args()
+def train(args):
+    checkpoint = ModelCheckpoint(dirpath=f"checkpoints/classifier/{wandb_logger.experiment.name}/",
+                                 save_top_k=2,
+                                 monitor="val/acc_epoch")
 
-    wandb_logger = WandbLogger(project='horizon')
     model = HorizonRollClassifier.from_argparse_args(args)
+
     trainer = pl.Trainer.from_argparse_args(args,
                                             strategy=DDPPlugin(find_unused_parameters=False),
                                             callbacks=[
                                                 LearningRateMonitor(),
-                                                WandbImagePredCallback(num_samples=32)
+                                                WandbImagePredCallback(num_samples=args.val_samples),
+                                                checkpoint
                                             ],
                                             enable_checkpointing=True,
                                             default_root_dir='.',
                                             logger=wandb_logger)
 
-    trainer.fit(model)
+    trainer.fit(model, ckpt_path=args.resume_training)
+
+
+def validate_checkpoint(args):
+    model = HorizonRollClassifier.load_from_checkpoint(args.validate_checkpoint)
+    trainer = pl.Trainer(callbacks=WandbImagePredCallback(num_samples=32), logger=wandb_logger)
+    trainer.validate(model)
+
+
+def predict_checkpoint(args):
+    model = HorizonRollClassifier.load_from_checkpoint(args.predict_checkpoint, no_mask=args.no_mask)
+    trainer = pl.Trainer()
+    trainer.predict(model)
+
+
+if __name__ == '__main__':
+    parser = ArgumentParser()
+    pl.Trainer.add_argparse_args(parser)
+    HorizonRollClassifier.add_argparse_args(parser)
+    parser.add_argument('--val_samples', type=int, default=16)
+    parser.add_argument('--resume_training', type=str, default=None)
+    parser.add_argument('--load_from_checkpoint', type=str, default=None)
+    parser.add_argument('--validate_checkpoint', type=str, default=None)
+    parser.add_argument('--predict_checkpoint', type=str, default=None)
+    args = parser.parse_args()
+
+    pl.seed_everything(1234)
+    wandb_logger = WandbLogger(project='horizon')
+
+    if args.validate_checkpoint is not None:
+        validate_checkpoint(args)
+    if args.predict_checkpoint is not None:
+        predict_checkpoint(args)
+    else:
+        train(args)
+
