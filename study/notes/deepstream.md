@@ -49,3 +49,20 @@ COMPLETE_TOKENS="${GST_TOKENS} ${NVDS_TOKENS}"
 complete -W '${COMPLETE_TOKENS}' gst-launch-1.0
 complete -W '${COMPLETE_TOKENS}' gst-inspect-1.0
 ```
+
+and now for some pipelines....
+
+```commandline
+gst-launch-1.0 filesrc location = /opt/nvidia/deepstream/deepstream-6.0/samples/streams/sample_1080p_h264.mp4 ! qtdemux ! \
+h264parse ! nvv4l2decoder ! m.sink_0 nvstreammux name=m batch-size=1 width=1920 height=1080 ! nvvideoconvert ! \
+nvdspreprocess config-file= /opt/nvidia/deepstream/deepstream-6.0/sources/gst-plugins/gst-nvdspreprocess/config_preprocess.txt  ! \
+nvinfer config-file-path= /opt/nvidia/deepstream/deepstream-6.0/samples/configs/deepstream-app/config_infer_primary.txt \
+input-tensor-meta=1 batch-size=7  ! nvmultistreamtiler width=1920 height=1080 ! nvvideoconvert ! nvdsosd ! nveglglessink
+```
+
+```commandline
+gst-launch-1.0 filesrc location = /opt/nvidia/deepstream/deepstream-6.0/samples/streams/sample_1080p_h264.mp4 ! qtdemux ! \
+h264parse ! nvv4l2decoder ! m.sink_0 nvstreammux name=m batch-size=1 width=1920 height=1080 ! nvvideoconvert ! \
+nvdspreprocess config-file= /opt/nvidia/deepstream/deepstream-6.0/sources/gst-plugins/gst-nvdspreprocess/config_preprocess.txt  ! \
+nveglglessink
+```
