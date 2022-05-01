@@ -28,7 +28,7 @@ def make_mask(image_size):
 class HorizonDataSet:
     def __init__(self, data_dir='data/horizon', num_classes=16, select_label=None, image_size=32, no_mask=False, no_rotate=False):
         self.data_dir = data_dir
-        self.rotate = ~no_rotate
+        self.rotate = not no_rotate
         self.bins = num_classes
         self.select_label = select_label
         self.image_size = image_size
@@ -44,7 +44,7 @@ class HorizonDataSet:
 
     def __getitem__(self, item):
 
-        img = read_image(f'{self.data_dir}/{self.index[item]}.png').float()
+        img = read_image(f'{self.data_dir}/{self.index[item]}').float()
 
         # resize
         h = self.image_size

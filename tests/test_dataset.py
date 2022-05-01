@@ -52,7 +52,7 @@ def r_matrix(angle):
 def test_horizon_dataset_visually():
     fig, ax = plt.subplots()
     fig.canvas.draw()
-    ds = dataset.HorizonDataSet(data_dir='data/test_visual', rotate=False, num_classes=16, image_size=64)
+    ds = dataset.HorizonDataSet(data_dir='data/test_visual', no_rotate=True, num_classes=16, image_size=64)
     for img, label in ds:
         ax.clear()
 
