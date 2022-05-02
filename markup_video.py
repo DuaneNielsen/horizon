@@ -1,3 +1,5 @@
+import sys
+
 import imageio as iio
 from matplotlib import pyplot as plt
 from matplotlib.backend_bases import MouseButton
@@ -7,6 +9,7 @@ from os.path import exists
 import os
 import numpy as np
 import json
+import argparse
 
 
 class Point(object):
@@ -85,27 +88,34 @@ class FramesDB:
 
 
 class HorizonMarkupTool:
-    def __init__(self, video_path, seed):
-        self.fig, self.ax = plt.subplots()
-        self.video_path = video_path
+    def __init__(self, data_dir, seed, video_path=None):
+        if data_dir is None:
+            print('data_dir is required')
+            sys.exit()
+        self.video_path = f"{data_dir}/video.mp4" if video_path is None else video_path
+        self.data_dir = data_dir
         self.seed = seed
         self.lines = FramesDB()
         self.tags = FramesDB()
-        self.reader = iio.get_reader(self.video_path)
-        self.num_frames = self.reader.count_frames()
         self.curr_frame = 0
-        self.image = self.reader.get_next_data()
         self.next_random = -1
 
         # forward declarations
+        self.reader = None
+        self.num_frames = None
+        self.image = None
         self.rng = None
         self.random_frames = None
         self.key_registry = None
+        self.fig, self.ax = None, None
 
         self.setup()
 
     def setup(self):
-
+        self.reader = iio.get_reader(self.video_path)
+        self.num_frames = self.reader.count_frames()
+        self.image = self.reader.get_next_data()
+        self.fig, self.ax = plt.subplots()
         self.rng = default_rng(seed=self.seed)
         self.random_frames = self.rng.choice(self.num_frames, self.num_frames, replace=False)
 
@@ -162,10 +172,18 @@ class HorizonMarkupTool:
 
     def __setstate__(self, state):
         self.__dict__.update(state)
-        self.fig, self.ax = plt.subplots()
-        self.reader = iio.get_reader(self.video_path)
-        self.num_frames = self.reader.count_frames()
-        self.setup()
+
+    @staticmethod
+    def load(filename, data_dir=None, video_path=None):
+        f = open(filename, 'rb')
+        tool = pickle.load(f)
+        f.close()
+        if args.video_path:
+            tool.video_path = video_path
+        if args.data_dir:
+            tool.data_dir = data_dir
+        tool.setup()
+        return tool
 
     def on_key_press(self, event):
         if event.key in self.key_registry:
@@ -280,28 +298,29 @@ class HorizonMarkupTool:
 
     def write_dataset(self, event):
 
-        if exists('data/horizon/lines.csv'):
-            os.remove('data/horizon/lines.csv')
+        if exists(f'{self.data_dir}/lines.csv'):
+            os.remove(f'{self.data_dir}/lines.csv')
 
         with open('data/horizon/lines.json', 'w') as f:
             flat_dict = {}
-            for key in self.lines.frames:
+            for i, key in enumerate(self.lines.frames):
                 lines = [l.flat for l in self.get_lines(key)]
                 if len(lines) > 0:
-                    flat_dict[str(key)] = lines
+                    filename = f'frame_{i:05d}.png'
+                    flat_dict[filename] = lines
             s = json.dumps(flat_dict)
             f.write(s)
 
         num_images = len(self.lines)
         count = 0
 
-        for frame in self.lines.frames:
+        for i, frame in enumerate(self.lines.frames):
             lines = self.get_lines(frame)
             if len(lines) > 0:
-                filename = f'data/horizon/{frame}.png'
+                filename = f'{self.data_dir}/frame_{i:05d}.png'
                 if not exists(filename):
                     self.reader.set_image_index(frame)
-                    iio.imwrite(f'data/horizon/{frame}.png', self.reader.get_next_data(), 'png')
+                    iio.imwrite(filename, self.reader.get_next_data(), 'png')
 
                 self.ax.clear()
                 count += 1
@@ -314,15 +333,20 @@ class HorizonMarkupTool:
 
 
 if __name__ == '__main__':
-    if exists('tool.pck'):
-        f = open('tool.pck', 'rb')
-        tool = pickle.load(f)
-        f.close()
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--video_path', type=str, default=None)
+    parser.add_argument('--data_dir', type=str, default=None)
+    parser.add_argument('--save', type=str, default='tool.pck')
+    args = parser.parse_args()
+
+    if exists(args.save):
+        tool = HorizonMarkupTool.load(args.save, args.data_dir, args.video_path)
     else:
-        tool = HorizonMarkupTool('/home/duane/Downloads/drone_fpv1.mp4', 34897368)
+        tool = HorizonMarkupTool(args.data_dir, args.video_path, 34897368)
 
     plt.show()
 
-    f = open('tool.pck', 'wb')
+    f = open(args.save, 'wb')
     pickle.dump(tool, f)
     f.close()
