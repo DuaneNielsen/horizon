@@ -66,3 +66,8 @@ h264parse ! nvv4l2decoder ! m.sink_0 nvstreammux name=m batch-size=1 width=1920 
 nvdspreprocess config-file= /opt/nvidia/deepstream/deepstream-6.0/sources/gst-plugins/gst-nvdspreprocess/config_preprocess.txt  ! \
 nveglglessink
 ```
+
+this one will replay the dataset to the screen
+```bash
+gst-launch-1.0 multifilesrc location="data/horizon/frame_%05d.png" caps="image/png,framerate=\(fraction\)2/1" ! pngdec ! videoconvert ! videorate ! autovideosink
+```
