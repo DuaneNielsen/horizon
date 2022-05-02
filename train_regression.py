@@ -80,7 +80,7 @@ class HorizonRollRegression(pl.LightningModule):
                                'select_label': select_label, 'image_size': image_size, 'no_mask': no_mask}
 
         self.dataloader_kwargs = {'batch_size': batch_size, 'num_workers': num_workers}
-        self.model = timm.create_model(self.hparams.model_str, num_classes=2)
+        self.model = timm.create_model(model_name=self.hparams.model_str, num_classes=2)
         self.train_set = None
         self.val_set = None
 
@@ -191,7 +191,7 @@ class HorizonRollRegression(pl.LightningModule):
 
 def train(args):
     checkpoint = ModelCheckpoint(dirpath=f"checkpoints/regression/{wandb_logger.experiment.name}/",
-                                 save_top_k=2,
+                                 save_top_k=2, mode='min',
                                  monitor="val/val_loss")
 
     model = HorizonRollRegression.from_argparse_args(args)
@@ -238,7 +238,7 @@ if __name__ == '__main__':
 
     if args.validate_checkpoint is not None:
         validate_checkpoint(args)
-    if args.predict_checkpoint is not None:
+    elif args.predict_checkpoint is not None:
         predict_checkpoint(args)
     else:
         train(args)

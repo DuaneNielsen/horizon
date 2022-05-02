@@ -11,8 +11,8 @@ import imageio_ffmpeg
 import torch.utils.data
 
 
-rgb_mean = [95.1683, 99.7394, 98.8952]
-rgb_std = [47.6498, 46.6025, 51.7941]
+rgb_mean = [98.1326, 98.1326, 98.1326]
+rgb_std = [50.2526, 50.2526, 50.2526]
 
 
 def reverse_norm(img):
@@ -148,6 +148,7 @@ if __name__ == '__main__':
     nimages = 0
     mean = torch.zeros(3)
     var = torch.zeros(3)
+    var_all = torch.zeros(1)
 
     import pathlib
 
@@ -162,10 +163,15 @@ if __name__ == '__main__':
         # Compute mean and std here
         mean += img.mean(1)
         var += img.var(1)
+        var_all += img.var()
 
     mean /= nimages
     var /= nimages
+    var_all /= nimages
     std = torch.sqrt(var)
+    std_all = torch.sqrt(var_all)
 
     print('mean', mean)
+    print('mean_all', mean.mean())
     print('std', std)
+    print('std_all', std_all)

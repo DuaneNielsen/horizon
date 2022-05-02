@@ -5,6 +5,8 @@ from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from pytorch_lightning.plugins import DDPPlugin
 from pytorch_lightning.loggers import WandbLogger
 import torchmetrics
+
+import dataset
 import wandb
 from argparse import ArgumentParser
 from dataset import HorizonDataSet
@@ -13,6 +15,53 @@ import timm
 from pytorch_lightning.utilities.types import TRAIN_DATALOADERS, EVAL_DATALOADERS
 from torch.utils.data import random_split, dataloader
 from math import ceil
+import gi
+gi.require_version('Gst', '1.0')
+from gi.repository import Gst
+import sys
+from typing import Optional, Any
+import gstreamer
+import cv2
+
+
+class AppSrcPipeline(gstreamer.GstPipeline):
+    def on_pipeline_init(self) -> None:
+        # Source element for reading from the file
+        print("Creating Source \n ")
+        appsource = Gst.ElementFactory.make("appsrc", "numpy-source")
+        if not appsource:
+            sys.stderr.write(" Unable to create Source \n")
+
+        nvvideoconvert = Gst.ElementFactory.make("nvvideoconvert", "nv-videoconv")
+        if not nvvideoconvert:
+            sys.stderr.write(" error nvvid1")
+
+        caps_filter = Gst.ElementFactory.make("capsfilter", "capsfilter1")
+        if not caps_filter:
+            sys.stderr.write(" error capsf1")
+
+        sink = Gst.ElementFactory.make("nveglglessink", "nvvideo-renderer")
+        if not sink:
+            sys.stderr.write(" Unable to create egl sink \n")
+
+        appsource_caps = Gst.Caps.from_string("video/x-raw,format=RGBA,width=64,height=64, framerate=1/1")
+        appsource.set_property("block", True)
+        appsource.set_property('caps', appsource_caps)
+
+        caps = Gst.Caps.from_string("video/x-raw(memory:NVMM),format=NV12,width=64,height=64, framerate=1/1")
+        caps_filter.set_property('caps', caps)
+
+        print("Adding elements to Pipeline \n")
+        self.pipeline.add(appsource)
+        self.pipeline.add(nvvideoconvert)
+        self.pipeline.add(caps_filter)
+        self.pipeline.add(sink)
+
+        # Working Link pipeline
+        print("Linking elements in the Pipeline \n")
+        appsource.link(nvvideoconvert)
+        nvvideoconvert.link(caps_filter)
+        caps_filter.link(sink)
 
 
 class WandbImagePredCallback(pl.Callback):
@@ -46,7 +95,7 @@ class HorizonRollClassifier(pl.LightningModule):
 
     def __init__(self, model_str: str, data_dir: str, lr: float = 1e-4, batch_size: int = 8,
                  select_label: str = 'discrete',
-                 num_classes: int = 16, num_workers: int = 0, image_size: int = 64, no_rotate: bool = False, no_mask: bool = False):
+                 num_classes: int = 16, num_workers: int = 0, image_size: int = 64, no_rotate: bool = False, no_mask: bool = False,):
         super().__init__()
         self.save_hyperparameters()
 
@@ -58,7 +107,7 @@ class HorizonRollClassifier(pl.LightningModule):
                                'num_classes': num_classes, 'select_label': select_label, 'image_size': image_size}
 
         self.dataloader_kwargs = {'batch_size': batch_size, 'num_workers': num_workers}
-        self.model = timm.create_model(self.hparams.model_str, num_classes=num_classes)
+        self.model = timm.create_model(model_name=model_str, num_classes=num_classes)
         self.train_set = None
         self.val_set = None
 
@@ -72,7 +121,10 @@ class HorizonRollClassifier(pl.LightningModule):
     @classmethod
     def add_argparse_args(cls, parser):
         for name, tipe, default in pl_argparse.get_init_arguments_and_types(cls):
-            parser.add_argument(f'--{name}', type=tipe[0], default=default)
+            if tipe[0] == bool:
+                parser.add_argument(f'--{name}', action='store_true')
+            else:
+                parser.add_argument(f'--{name}', type=tipe[0], default=default)
 
     def setup(self, stage=None):
         full = HorizonDataSet(**self.dataset_kwargs)
@@ -116,9 +168,12 @@ class HorizonRollClassifier(pl.LightningModule):
 
     def validation_epoch_end(self, outputs):
         avg_loss = torch.stack([x['val_loss'] for x in outputs]).mean()
-        tensorboard_logs = {'val_loss': avg_loss}
-        self.log('val/acc_epoch', self.val_acc)
-        return {'avg_val_loss': avg_loss, 'log': tensorboard_logs}
+        log = {
+            'val/val_loss': avg_loss,
+            'val/acc_epoch': self.val_acc
+            }
+        [self.log(k, v) for k, v in log.items()]
+        return log
 
     def test_epoch_end(self, outputs):
         avg_loss = torch.stack([x['test_loss'] for x in outputs]).mean()
@@ -138,16 +193,46 @@ class HorizonRollClassifier(pl.LightningModule):
         return dataloader.DataLoader(self.val_set, **self.dataloader_kwargs)
 
     def predict_dataloader(self) -> EVAL_DATALOADERS:
-        pass
+        return dataloader.DataLoader(self.val_set, **self.dataloader_kwargs)
 
     def train_dataloader(self) -> TRAIN_DATALOADERS:
         return dataloader.DataLoader(self.train_set, **self.dataloader_kwargs)
+
+    def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: Optional[int] = None) -> Any:
+        global pipeline
+        appsource = pipeline.get_by_name('numpy-source')
+        images, labels = batch
+        for img in images:
+            img = dataset.reverse_norm(img).permute(1, 2, 0).byte()
+            arr = img.numpy()
+            arr = cv2.cvtColor(arr, cv2.COLOR_RGB2RGBA)
+            gst_buffer = gstreamer.ndarray_to_gst_buffer(arr)
+            appsource.emit("push-buffer", gst_buffer)
+        return None
+
+
+global pipeline
+
+
+def predict_checkpoint(args):
+    with gstreamer.GstContext():
+        global pipeline
+        pipeline = AppSrcPipeline()
+        try:
+            pipeline.startup()
+            model = HorizonRollClassifier.load_from_checkpoint(args.predict_checkpoint, no_mask=args.no_mask)
+            trainer = pl.Trainer()
+            trainer.predict(model)
+        except Exception as e:
+            print('Error: ', e)
+        finally:
+            pipeline.shutdown()
 
 
 def train(args):
     checkpoint = ModelCheckpoint(dirpath=f"checkpoints/classifier/{wandb_logger.experiment.name}/",
                                  save_top_k=2,
-                                 monitor="val/acc_epoch")
+                                 monitor="val/acc_epoch", mode='max')
 
     model = HorizonRollClassifier.from_argparse_args(args)
 
@@ -171,12 +256,6 @@ def validate_checkpoint(args):
     trainer.validate(model)
 
 
-def predict_checkpoint(args):
-    model = HorizonRollClassifier.load_from_checkpoint(args.predict_checkpoint, no_mask=args.no_mask)
-    trainer = pl.Trainer()
-    trainer.predict(model)
-
-
 if __name__ == '__main__':
     parser = ArgumentParser()
     pl.Trainer.add_argparse_args(parser)
@@ -193,7 +272,7 @@ if __name__ == '__main__':
 
     if args.validate_checkpoint is not None:
         validate_checkpoint(args)
-    if args.predict_checkpoint is not None:
+    elif args.predict_checkpoint is not None:
         predict_checkpoint(args)
     else:
         train(args)
