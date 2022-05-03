@@ -39,7 +39,19 @@ def probe_nvdsosd_pad_src_data(pad, info):
         except StopIteration:
             break
         frame_number = frame_meta.frame_num
-        print(frame_number)
+
+        l_obj = frame_meta.obj_meta_list
+        while l_obj is not None:
+            try:
+                obj_meta = pyds.NvDsObjectMeta.cast(l_obj.data)
+            except StopIteration:
+                break
+            class_id = obj_meta.class_id
+            print(class_id)
+            try:
+                l_obj = l_obj.next
+            except StopIteration:
+                break
         try:
             l_frame = l_frame.next
         except StopIteration:
