@@ -26,9 +26,13 @@ def make_mask(image_size):
 
 
 class HorizonDataSet:
-    def __init__(self, data_dir='data/horizon', num_classes=16, select_label=None, image_size=32, no_mask=False, no_rotate=False):
+    def __init__(self, data_dir='data/horizon', num_classes=16, select_label=None, image_size=32,
+                 no_rotate=False, no_mask=False, no_resize=False, no_normalize=False):
         self.data_dir = data_dir
         self.rotate = not no_rotate
+        self.mask = not no_mask
+        self.resize = not no_resize
+        self.normalize = not no_normalize
         self.bins = num_classes
         self.select_label = select_label
         self.image_size = image_size
@@ -37,7 +41,7 @@ class HorizonDataSet:
             lines = json.loads(f.read())
         self.lines = lines
         self.index = list(lines)
-        self.mask = make_mask(image_size)
+        self.circular_mask = make_mask(image_size)
 
     def __len__(self):
         return len(self.lines)
@@ -46,18 +50,25 @@ class HorizonDataSet:
 
         img = read_image(f'{self.data_dir}/{self.index[item]}').float()
 
-        # resize
+        """ 
+        The image will be resized from its original size to a h x h square
+        since the aspect ratio changes, this will also mean we need to rescale the lines and angles
+        """
         h = self.image_size
         orig_h, orig_w = img.shape[1], img.shape[2]
         rescale_x_factor = orig_h / orig_w
         scale = orig_h / h
-        img = resize(img, [h, h])
 
-        # normalize
-        img = normalize(img, rgb_mean, rgb_std, inplace=True)
+        if self.resize:
+            img = resize(img, [h, h])
+
+        if self.normalize:
+            img = normalize(img, rgb_mean, rgb_std, inplace=True)
 
         # load the serialized form into a numpy array
         lines = np.stack([Line.from_flat(line).to_numpy() for line in self.lines[self.index[item]]], axis=-1)
+
+        """ we always rescale the lines, because we will assume that the rescaling to the target will happen later """
         lines[0, :, :] = lines[0, :, :] * rescale_x_factor
         lines[:, :, :] = lines[:, :, :] / scale
 
@@ -77,8 +88,9 @@ class HorizonDataSet:
 
         complex_mean = torch.complex(real=torch.cos(angle), imag=torch.sin(angle))
 
-        # mask the image so there are no edges
-        img = img * self.mask.unsqueeze(0)
+        if self.mask:
+            # mask the image so there are no edges
+            img = img * self.circular_mask.unsqueeze(0)
 
         # calculate class
         slise_size = (2 * np.pi) / self.bins

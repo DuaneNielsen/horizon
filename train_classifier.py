@@ -22,46 +22,85 @@ import sys
 from typing import Optional, Any
 import gstreamer
 import cv2
+from pydevd_pycharm import settrace
+import traceback
+
+
+def probe_nvdsosd_pad_src_data(pad, info):
+    print('entered probe_nvsink_pad_src_data')
+    return Gst.PadProbeReturn.OK
+
+
+def probe_nvvideoconvert_pad_src_data(pad, info):
+    print("entered probe_nvvideoconvert_pad_src_data")
+    # settrace()
+    # dts = info.get_buffer().dts
+    # print(dts)
+    # pts = info.get_buffer().pts
+    # print(pts)
+    return Gst.PadProbeReturn.OK
 
 
 class AppSrcPipeline(gstreamer.GstPipeline):
+    """
+    A gstreamer pipeline to test inferance
+    """
     def on_pipeline_init(self) -> None:
         # Source element for reading from the file
         print("Creating Source \n ")
         appsource = Gst.ElementFactory.make("appsrc", "numpy-source")
-        if not appsource:
-            sys.stderr.write(" Unable to create Source \n")
-
-        nvvideoconvert = Gst.ElementFactory.make("nvvideoconvert", "nv-videoconv")
-        if not nvvideoconvert:
-            sys.stderr.write(" error nvvid1")
-
-        caps_filter = Gst.ElementFactory.make("capsfilter", "capsfilter1")
-        if not caps_filter:
-            sys.stderr.write(" error capsf1")
-
-        sink = Gst.ElementFactory.make("nveglglessink", "nvvideo-renderer")
-        if not sink:
-            sys.stderr.write(" Unable to create egl sink \n")
-
-        appsource_caps = Gst.Caps.from_string("video/x-raw,format=RGBA,width=64,height=64, framerate=1/1")
+        appsource_caps = Gst.Caps.from_string("video/x-raw,format=RGBA,width=1280,height=560, framerate=1/1")
         appsource.set_property("block", True)
         appsource.set_property('caps', appsource_caps)
+
+        nvvideoconvert_in = Gst.ElementFactory.make("nvvideoconvert", "nv-videoconv-in")
+
+        nvstreammux = Gst.ElementFactory.make("nvstreammux")
+        nvstreammux.set_property('width', 64)
+        nvstreammux.set_property('height', 64)
+        nvstreammux.set_property('batch-size', 1)
+        nvstreammux.set_property('batched-push-timeout', 4000000)
+        nvstreammux_sink_0 = nvstreammux.get_request_pad("sink_0")
+
+        nvinfer = Gst.ElementFactory.make("nvinfer")
+        nvinfer.set_property('config-file-path', "roll_classifier_pgie_config.txt")
+
+        nvvideoconvert_out = Gst.ElementFactory.make("nvvideoconvert", "nv-videoconv-out")
+
+        caps_filter = Gst.ElementFactory.make("capsfilter", "capsfilter1")
+
+        nvdsosd = Gst.ElementFactory.make('nvdsosd', 'nvdsosd')
+        nvdsosd.get_static_pad("sink").add_probe(Gst.PadProbeType.BUFFER, probe_nvdsosd_pad_src_data)
+
+        sink = Gst.ElementFactory.make("nveglglessink", "nvvideo-renderer")
 
         caps = Gst.Caps.from_string("video/x-raw(memory:NVMM),format=NV12,width=64,height=64, framerate=1/1")
         caps_filter.set_property('caps', caps)
 
+        nvvideoconvert_out_pad_src = nvvideoconvert_out.get_static_pad('src')
+        nvvideoconvert_out_pad_src.add_probe(Gst.PadProbeType.BUFFER, probe_nvvideoconvert_pad_src_data)
+
         print("Adding elements to Pipeline \n")
         self.pipeline.add(appsource)
-        self.pipeline.add(nvvideoconvert)
+        self.pipeline.add(nvvideoconvert_in)
+        self.pipeline.add(nvstreammux)
+        self.pipeline.add(nvinfer)
+        self.pipeline.add(nvvideoconvert_out)
         self.pipeline.add(caps_filter)
+        self.pipeline.add(nvdsosd)
         self.pipeline.add(sink)
 
         # Working Link pipeline
         print("Linking elements in the Pipeline \n")
-        appsource.link(nvvideoconvert)
-        nvvideoconvert.link(caps_filter)
-        caps_filter.link(sink)
+
+        appsource.link(nvvideoconvert_in)
+        nvvideoconvert_in.link(nvstreammux)
+        nvstreammux.link(nvinfer)
+        nvinfer.link(nvvideoconvert_out)
+        #nvvideoconvert_out.link(caps_filter)
+        #caps_filter.link(nvdsosd)
+        nvvideoconvert_out.link(nvdsosd)
+        nvdsosd.link(sink)
 
 
 class WandbImagePredCallback(pl.Callback):
@@ -95,7 +134,8 @@ class HorizonRollClassifier(pl.LightningModule):
 
     def __init__(self, model_str: str, data_dir: str, lr: float = 1e-4, batch_size: int = 8,
                  select_label: str = 'discrete',
-                 num_classes: int = 16, num_workers: int = 0, image_size: int = 64, no_rotate: bool = False, no_mask: bool = False,):
+                 num_classes: int = 16, num_workers: int = 0, image_size: int = 64,
+                 no_rotate: bool = False, no_mask: bool = False, no_resize=False, no_normalize=False):
         super().__init__()
         self.save_hyperparameters()
 
@@ -103,8 +143,10 @@ class HorizonRollClassifier(pl.LightningModule):
         self.val_acc = torchmetrics.Accuracy()
 
         # init args
-        self.dataset_kwargs = {'data_dir': data_dir, 'no_rotate': no_rotate, 'no_mask': no_mask,
-                               'num_classes': num_classes, 'select_label': select_label, 'image_size': image_size}
+        self.dataset_kwargs = {'data_dir': data_dir,
+                               'num_classes': num_classes, 'select_label': select_label, 'image_size': image_size,
+                               'no_rotate': no_rotate, 'no_mask': no_mask, 'no_resize': no_resize,
+                               'no_normalize': no_normalize}
 
         self.dataloader_kwargs = {'batch_size': batch_size, 'num_workers': num_workers}
         self.model = timm.create_model(model_name=model_str, num_classes=num_classes)
@@ -203,8 +245,7 @@ class HorizonRollClassifier(pl.LightningModule):
         appsource = pipeline.get_by_name('numpy-source')
         images, labels = batch
         for img in images:
-            img = dataset.reverse_norm(img).permute(1, 2, 0).byte()
-            arr = img.numpy()
+            arr = img.permute(1, 2, 0).byte().numpy()
             arr = cv2.cvtColor(arr, cv2.COLOR_RGB2RGBA)
             gst_buffer = gstreamer.ndarray_to_gst_buffer(arr)
             appsource.emit("push-buffer", gst_buffer)
@@ -220,11 +261,12 @@ def predict_checkpoint(args):
         pipeline = AppSrcPipeline()
         try:
             pipeline.startup()
-            model = HorizonRollClassifier.load_from_checkpoint(args.predict_checkpoint, no_mask=args.no_mask)
+            model = HorizonRollClassifier.load_from_checkpoint(args.predict_checkpoint, no_mask=True, no_resize=True,
+                                                               no_normalize=True, no_rotate=True)
             trainer = pl.Trainer()
             trainer.predict(model)
         except Exception as e:
-            print('Error: ', e)
+            traceback.print_exc()
         finally:
             pipeline.shutdown()
 
