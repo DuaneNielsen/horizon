@@ -24,20 +24,27 @@ import gstreamer
 import cv2
 from pydevd_pycharm import settrace
 import traceback
+import pyds
+import time
 
 
 def probe_nvdsosd_pad_src_data(pad, info):
     print('entered probe_nvsink_pad_src_data')
-    return Gst.PadProbeReturn.OK
+    gst_buffer = info.get_buffer()
+    batch_meta = pyds.gst_buffer_get_nvds_batch_meta(hash(gst_buffer))
+    l_frame = batch_meta.frame_meta_list
+    while l_frame is not None:
+        try:
+            frame_meta = pyds.NvDsFrameMeta.cast(l_frame.data)
+        except StopIteration:
+            break
+        frame_number = frame_meta.frame_num
+        print(frame_number)
+        try:
+            l_frame = l_frame.next
+        except StopIteration:
+            break
 
-
-def probe_nvvideoconvert_pad_src_data(pad, info):
-    print("entered probe_nvvideoconvert_pad_src_data")
-    # settrace()
-    # dts = info.get_buffer().dts
-    # print(dts)
-    # pts = info.get_buffer().pts
-    # print(pts)
     return Gst.PadProbeReturn.OK
 
 
@@ -78,7 +85,6 @@ class AppSrcPipeline(gstreamer.GstPipeline):
         caps_filter.set_property('caps', caps)
 
         nvvideoconvert_out_pad_src = nvvideoconvert_out.get_static_pad('src')
-        nvvideoconvert_out_pad_src.add_probe(Gst.PadProbeType.BUFFER, probe_nvvideoconvert_pad_src_data)
 
         print("Adding elements to Pipeline \n")
         self.pipeline.add(appsource)
@@ -249,6 +255,7 @@ class HorizonRollClassifier(pl.LightningModule):
             arr = cv2.cvtColor(arr, cv2.COLOR_RGB2RGBA)
             gst_buffer = gstreamer.ndarray_to_gst_buffer(arr)
             appsource.emit("push-buffer", gst_buffer)
+            time.sleep(0.3)
         return None
 
 
