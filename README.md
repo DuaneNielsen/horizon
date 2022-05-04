@@ -41,3 +41,8 @@ pip3 install torch torchvision torchaudio --extra-index-url https://download.pyt
 
 pip3 install torch-tensorrt -f https://github.com/NVIDIA/Torch-TensorRT/releases
 ```
+
+convert onnx model to tensorRT engine
+```bash
+trtexec --onnx='epoch=173-step=7829.onnx' --explicitBatch --workspace=2048 --saveEngine=epoch=173-step=7829.engine
+```

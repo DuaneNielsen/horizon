@@ -53,24 +53,26 @@
 # properties.
 
 [property]
+network-type=1
 gpu-id=0
-net-scale-factor=0.0039215697906911373
-model-file=/opt/nvidia/deepstream/deepstream/samples/models/Primary_Detector/resnet10.caffemodel
-proto-file=/opt/nvidia/deepstream/deepstream/samples/models/Primary_Detector/resnet10.prototxt
-model-engine-file=/opt/nvidia/deepstream/deepstream/samples/models/Primary_Detector/resnet10.caffemodel_b1_gpu0_int8.engine
-labelfile-path=/opt/nvidia/deepstream/deepstream/samples/models/Primary_Detector/labels.txt
-int8-calib-file=/opt/nvidia/deepstream/deepstream/samples/models/Primary_Detector/cal_trt.bin
-force-implicit-batch-dim=1
+net-scale-factor=0.019899468
 batch-size=1
-network-mode=1
-num-detected-classes=4
-interval=0
+model-engine-file=checkpoints/classifier/leafy-snowflake-43/epoch=173-step=7829.engine
+#onnx-file=checkpoints/classifier/leafy-snowflake-43/epoch=173-step=7829.onnx
+#labelfile-path=/opt/nvidia/deepstream/deepstream/samples/models/Primary_Detector/labels.txt
 gie-unique-id=1
-output-blob-names=conv2d_bbox;conv2d_cov/Sigmoid
+network-mode=0
+offsets=98.1326;98.1326;98.1326
+output-blob-names=modelOutput
+force-implicit-batch-dim=1
+process-mode=1
+num-detected-classes=16
+interval=0
+
 #scaling-filter=0
 #scaling-compute-hw=0
 
-[class-attrs-all]
-pre-cluster-threshold=0.2
-eps=0.2
-group-threshold=1
+#[class-attrs-all]
+#pre-cluster-threshold=0.2
+#eps=0.2
+#group-threshold=1

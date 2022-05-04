@@ -26,21 +26,27 @@ from pydevd_pycharm import settrace
 import traceback
 import pyds
 import time
+from pathlib import Path
 
 
 def probe_nvdsosd_pad_src_data(pad, info):
     print('entered probe_nvsink_pad_src_data')
+
     gst_buffer = info.get_buffer()
     batch_meta = pyds.gst_buffer_get_nvds_batch_meta(hash(gst_buffer))
     l_frame = batch_meta.frame_meta_list
+    #settrace()
     while l_frame is not None:
         try:
             frame_meta = pyds.NvDsFrameMeta.cast(l_frame.data)
         except StopIteration:
             break
         frame_number = frame_meta.frame_num
-
+        print(frame_number)
         l_obj = frame_meta.obj_meta_list
+        l_meta = frame_meta.frame_user_meta_list
+        print(l_obj)
+        print(l_meta)
         while l_obj is not None:
             try:
                 obj_meta = pyds.NvDsObjectMeta.cast(l_obj.data)
@@ -274,14 +280,44 @@ class HorizonRollClassifier(pl.LightningModule):
 global pipeline
 
 
+# Function to Convert to ONNX
+def convert_ONNX(model, onnx_filename, input_size):
+    # set the model to inference mode
+    model.eval()
+
+    # Let's create a dummy input tensor
+    dummy_input = torch.randn(*input_size, requires_grad=True)
+
+    # Export the model
+    torch.onnx.export(model,  # model being run
+                      dummy_input,  # model input (or a tuple for multiple inputs)
+                      onnx_filename,  # where to save the model
+                      export_params=True,  # store the trained parameter weights inside the model file
+                      opset_version=10,  # the ONNX version to export the model to
+                      do_constant_folding=True,  # whether to execute constant folding for optimization
+                      input_names=['modelInput'],  # the model's input names
+                      output_names=['modelOutput'])  # the model's output names
+                      # dynamic_axes={'modelInput': {1: 'batch_size'},  # variable length axes
+                      #               'modelOutput': {1: 'batch_size'}})
+    print(" ")
+    print('Model has been converted to ONNX')
+
+
 def predict_checkpoint(args):
+
+    model = HorizonRollClassifier.load_from_checkpoint(args.predict_checkpoint, no_mask=True, no_resize=True,
+                                                       no_normalize=True, no_rotate=True)
+
+    checkpt_path = Path(args.predict_checkpoint)
+    onnx_path = checkpt_path.parent / Path(checkpt_path.stem + '.onnx')
+    #if not onnx_path.exists():
+    convert_ONNX(model.model, str(onnx_path), (1, 3, model.hparams.image_size, model.hparams.image_size))
+
     with gstreamer.GstContext():
         global pipeline
         pipeline = AppSrcPipeline()
         try:
             pipeline.startup()
-            model = HorizonRollClassifier.load_from_checkpoint(args.predict_checkpoint, no_mask=True, no_resize=True,
-                                                               no_normalize=True, no_rotate=True)
             trainer = pl.Trainer()
             trainer.predict(model)
         except Exception as e:
