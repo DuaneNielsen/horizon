@@ -68,6 +68,7 @@ force-implicit-batch-dim=1
 process-mode=1
 num-detected-classes=16
 interval=0
+output-tensor-meta=1
 
 #scaling-filter=0
 #scaling-compute-hw=0

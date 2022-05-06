@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+import torch.nn as nn
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 from pytorch_lightning.plugins import DDPPlugin
@@ -27,6 +28,8 @@ import traceback
 import pyds
 import time
 from pathlib import Path
+import ctypes
+import numpy as np
 
 
 def probe_nvdsosd_pad_src_data(pad, info):
@@ -47,15 +50,21 @@ def probe_nvdsosd_pad_src_data(pad, info):
         l_meta = frame_meta.frame_user_meta_list
         print(l_obj)
         print(l_meta)
-        while l_obj is not None:
+        while l_meta is not None:
             try:
-                obj_meta = pyds.NvDsObjectMeta.cast(l_obj.data)
+                user_meta = pyds.NvDsUserMeta.cast(l_meta.data)
+                tensor_meta = pyds.NvDsInferTensorMeta.cast(user_meta.user_meta_data)
+                layer = pyds.get_nvds_LayerInfo(tensor_meta, 0)
+                ptr = ctypes.cast(pyds.get_ptr(layer.buffer), ctypes.POINTER(ctypes.c_float))
+                probs = np.array(np.ctypeslib.as_array(ptr, shape=(layer.dims.numElements,)), copy=True)
             except StopIteration:
                 break
-            class_id = obj_meta.class_id
-            print(class_id)
+            print(user_meta.base_meta.meta_type)
+            print(tensor_meta)
+            print(layer)
+            print(probs)
             try:
-                l_obj = l_obj.next
+                l_meta = l_meta.next
             except StopIteration:
                 break
         try:
@@ -278,6 +287,14 @@ class HorizonRollClassifier(pl.LightningModule):
 
 
 global pipeline
+
+
+class DummyPrimaryModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        return
 
 
 # Function to Convert to ONNX
