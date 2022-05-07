@@ -84,7 +84,7 @@ class HorizonDataSet:
             d_angle = torch.rand(1) * 2 * torch.pi
             img = rotate(img, angle=degrees(d_angle.item()), center=[img.shape[2] / 2, img.shape[1] / 2])
             angle = angle - d_angle
-            angle = (angle + 2 * np.pi) % (2 * np.pi)
+        angle = (angle + 2 * np.pi) % (2 * np.pi)
 
         complex_mean = torch.complex(real=torch.cos(angle), imag=torch.sin(angle))
 

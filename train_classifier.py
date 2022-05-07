@@ -32,37 +32,33 @@ import ctypes
 import numpy as np
 
 
+def to_numpy(l_meta):
+    user_meta = pyds.NvDsUserMeta.cast(l_meta.data)
+    tensor_meta = pyds.NvDsInferTensorMeta.cast(user_meta.user_meta_data)
+    layer = pyds.get_nvds_LayerInfo(tensor_meta, 0)
+    ptr = ctypes.cast(pyds.get_ptr(layer.buffer), ctypes.POINTER(ctypes.c_float))
+    array = np.array(np.ctypeslib.as_array(ptr, shape=(layer.dims.numElements,)), copy=True)
+    return array
+
+
 def probe_nvdsosd_pad_src_data(pad, info):
     print('entered probe_nvsink_pad_src_data')
 
     gst_buffer = info.get_buffer()
     batch_meta = pyds.gst_buffer_get_nvds_batch_meta(hash(gst_buffer))
     l_frame = batch_meta.frame_meta_list
-    #settrace()
     while l_frame is not None:
         try:
             frame_meta = pyds.NvDsFrameMeta.cast(l_frame.data)
         except StopIteration:
             break
         frame_number = frame_meta.frame_num
-        print(frame_number)
         l_obj = frame_meta.obj_meta_list
         l_meta = frame_meta.frame_user_meta_list
-        print(l_obj)
-        print(l_meta)
         while l_meta is not None:
-            try:
-                user_meta = pyds.NvDsUserMeta.cast(l_meta.data)
-                tensor_meta = pyds.NvDsInferTensorMeta.cast(user_meta.user_meta_data)
-                layer = pyds.get_nvds_LayerInfo(tensor_meta, 0)
-                ptr = ctypes.cast(pyds.get_ptr(layer.buffer), ctypes.POINTER(ctypes.c_float))
-                probs = np.array(np.ctypeslib.as_array(ptr, shape=(layer.dims.numElements,)), copy=True)
-            except StopIteration:
-                break
-            print(user_meta.base_meta.meta_type)
-            print(tensor_meta)
-            print(layer)
-            print(probs)
+            probs = to_numpy(l_meta)
+            angle = np.argmax(probs)
+            print(f'estimate {angle}')
             try:
                 l_meta = l_meta.next
             except StopIteration:
@@ -277,12 +273,13 @@ class HorizonRollClassifier(pl.LightningModule):
         global pipeline
         appsource = pipeline.get_by_name('numpy-source')
         images, labels = batch
-        for img in images:
+        for img, label in zip(images, labels):
             arr = img.permute(1, 2, 0).byte().numpy()
             arr = cv2.cvtColor(arr, cv2.COLOR_RGB2RGBA)
             gst_buffer = gstreamer.ndarray_to_gst_buffer(arr)
             appsource.emit("push-buffer", gst_buffer)
-            time.sleep(0.3)
+            time.sleep(1.0)
+            print(f'label: {label.item()}')
         return None
 
 
