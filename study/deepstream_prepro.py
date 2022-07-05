@@ -48,10 +48,12 @@ def probe_nvdspreprocess_pad_src_data(pad, info):
                 ptr = ctypes.cast(host_mem_ptr, ctypes.POINTER(ctypes.c_float))
                 ctypes_array = np.ctypeslib.as_array(ptr, shape=nvds_tensor.tensor_shape)
                 array = np.array(ctypes_array, copy=True)
+                freeHost(host_mem_ptr)
+
                 rgb_array = (array[0] * 256).astype(np.uint8).transpose(1, 2, 0)
                 cv2.imshow("baseball", rgb_array)
                 cv2.waitKey(1)
-                freeHost(host_mem_ptr)
+
 
             except StopIteration:
                 break
@@ -74,6 +76,10 @@ class DeepstreamPrepro(GstCommandPipeline):
         prepro_src = prepro.get_static_pad('src')
         prepro_src.add_probe(Gst.PadProbeType.BUFFER, probe_nvdspreprocess_pad_src_data)
 
+    def on_eos(self, bus: Gst.Bus, message: Gst.Message):
+        cv2.destroyAllWindows()
+        self._shutdown_pipeline()
+
 
 if __name__ == '__main__':
 
@@ -81,4 +87,3 @@ if __name__ == '__main__':
         while not pipeline.is_done:
             time.sleep(.1)
 
-        cv2.destroyAllWindows()
