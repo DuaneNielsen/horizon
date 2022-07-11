@@ -6,6 +6,9 @@ from gi.repository import GObject, Gst, GLib
 import numpy as np
 import threading
 import typing as typ
+import sys
+
+Gst.init(sys.argv if hasattr(sys, "argv") else None)
 
 
 def ndarray_to_gst_buffer(array: np.ndarray) -> Gst.Buffer:
@@ -178,6 +181,7 @@ class GstPipeline:
         return self._pipeline
 
     def _shutdown_pipeline(self, timeout: int = 1, eos: bool = False) -> None:
+        print('SHUTDOWN_PIPELINE')
         """ Stops pipeline
         :param eos: if True -> send EOS event
             - EOS event necessary for FILESINK finishes properly

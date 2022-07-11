@@ -5,14 +5,23 @@ import cv2
 import pyds
 import ctypes
 import numpy as np
+from PIL import Image
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
+import json
+import os
 
 # THE ORDER IN WHICH THIS IS MODULE IS INCLUDED MATTERS
 from cupy.cuda.runtime import hostAlloc, memcpy, freeHost
 
+global counter
+counter = 0
 
-def probe_nvdspreprocess_pad_src_data(pad, info):
-    print('entered probe')
 
+def probe_nvdspreprocess_pad_src_data(pad, info, pipeline):
+
+    global counter
     gst_buffer = info.get_buffer()
     batch_meta = pyds.gst_buffer_get_nvds_batch_meta(hash(gst_buffer))
     l_user = batch_meta.batch_user_meta_list
@@ -26,24 +35,21 @@ def probe_nvdspreprocess_pad_src_data(pad, info):
                 nvds_prepro_batch_meta = pyds.GstNvDsPreProcessBatchMeta.cast(user_meta.user_meta_data)
                 nvds_tensor = pyds.NvDsPreProcessTensorMeta.cast(nvds_prepro_batch_meta.tensor_meta)
 
-                print(nvds_tensor.buffer_size)
-                print(nvds_tensor.tensor_shape)
-                print(nvds_tensor.data_type)
-                print(nvds_tensor.gpu_id)
-                print(nvds_tensor.raw_tensor_buffer)
-
                 cuda_mem_ptr = pyds.get_ptr(nvds_tensor.raw_tensor_buffer)
                 host_mem_ptr = hostAlloc(nvds_tensor.buffer_size, 0)
                 memcpy(host_mem_ptr, cuda_mem_ptr, nvds_tensor.buffer_size, 0)
                 ptr = ctypes.cast(host_mem_ptr, ctypes.POINTER(ctypes.c_float))
                 ctypes_array = np.ctypeslib.as_array(ptr, shape=nvds_tensor.tensor_shape)
-                array = np.array(ctypes_array, copy=True)
-                print(array.sum())
+                array = np.array(ctypes_array, copy=True).astype(np.float32)
+
+                frame = pipeline.keys[counter].split('.')[0]
+                np.save(f'data/horizon/normalized/{frame}', array)
+                counter += 1
+
                 freeHost(host_mem_ptr)
 
                 rgb_array = (array[0] * 256).astype(np.uint8).transpose(1, 2, 0)
-                cv2.imshow("baseball", rgb_array)
-                cv2.waitKey(1)
+                cv2.imwrite(f'data/horizon/normalized_jpg/{frame}.jpg', rgb_array)
 
             except StopIteration:
                 break
@@ -70,17 +76,20 @@ class DeepstreamPreProcessor(GstCommandPipeline):
             f'! nvvideoconvert '
             f'! nveglglessink'
         )
+        self.lines = json.load(open('./data/horizon/lines.json', 'r'))
+        self.keys = [key for key in self.lines]
 
     def on_pipeline_init(self) -> None:
-        super().on_pipeline_init()
-
         prepro = self.get_by_name('nvdspreprocess0')
         prepro_src = prepro.get_static_pad('src')
-        prepro_src.add_probe(Gst.PadProbeType.BUFFER, probe_nvdspreprocess_pad_src_data)
+        prepro_src.add_probe(Gst.PadProbeType.BUFFER, probe_nvdspreprocess_pad_src_data, self)
 
 
 if __name__ == '__main__':
 
     with DeepstreamPreProcessor() as pipeline:
         while not pipeline.is_done:
-            time.sleep(.1)
+            time.sleep(.01)
+            message = pipeline.bus.timed_pop_filtered(1000, Gst.MessageType.EOS)
+            if message is not None:
+                break

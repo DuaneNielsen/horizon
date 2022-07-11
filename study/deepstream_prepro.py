@@ -68,7 +68,17 @@ def probe_nvdspreprocess_pad_src_data(pad, info):
 
 class DeepstreamPrepro(GstCommandPipeline):
     def __init__(self):
-        command = 'filesrc location = /opt/nvidia/deepstream/deepstream-6.0/samples/streams/sample_1080p_h264.mp4 ! qtdemux ! h264parse ! nvv4l2decoder ! m.sink_0 nvstreammux name=m batch-size=1 width=1920 height=1080 ! nvvideoconvert ! nvdspreprocess name=prepro config-file= roll_classifier_prepro.txt  ! nvinfer config-file-path= /opt/nvidia/deepstream/deepstream-6.0/samples/configs/deepstream-app/config_infer_primary.txt input-tensor-meta=1 batch-size=7  ! nvmultistreamtiler width=1920 height=1080 ! nvvideoconvert ! nvdsosd ! nveglglessink'
+        command = 'filesrc location = /opt/nvidia/deepstream/deepstream-6.0/samples/streams/sample_1080p_h264.mp4 ' \
+                  '! qtdemux ' \
+                  '! h264parse ' \
+                  '! nvv4l2decoder ' \
+                  '! m.sink_0 nvstreammux name=m batch-size=1 width=1920 height=1080  ' \
+                  '! nvdspreprocess name=prepro config-file= roll_classifier_prepro.txt  ' \
+                  '! nvinfer config-file-path= /opt/nvidia/deepstream/deepstream-6.0/samples/configs/deepstream-app/config_infer_primary.txt input-tensor-meta=1 batch-size=7  ' \
+                  '! nvmultistreamtiler width=1920 height=1080 ' \
+                  '! nvvideoconvert ' \
+                  '! nvdsosd ' \
+                  '! nveglglessink'
         super().__init__(command)
 
     def on_pipeline_init(self) -> None:

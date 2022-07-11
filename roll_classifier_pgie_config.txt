@@ -53,6 +53,7 @@
 # properties.
 
 [property]
+input-tensor-from-meta=1
 network-type=1
 gpu-id=0
 net-scale-factor=0.019899468

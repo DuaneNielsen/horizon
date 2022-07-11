@@ -25,6 +25,12 @@ def make_mask(image_size):
     return torch.sqrt(x ** 2 + y ** 2).lt(image_size // 2)
 
 
+def prepro(img, h):
+    img = resize(img, [h, h])
+    img = normalize(img, rgb_mean, rgb_std, inplace=True)
+    return img
+
+
 class HorizonDataSet:
     def __init__(self, data_dir='data/horizon', num_classes=16, select_label=None, image_size=32,
                  no_rotate=False, no_mask=False, no_resize=False, no_normalize=False):

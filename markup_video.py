@@ -10,6 +10,7 @@ import os
 import numpy as np
 import json
 import argparse
+from tqdm import tqdm
 
 
 class Point(object):
@@ -301,23 +302,28 @@ class HorizonMarkupTool:
         if exists(f'{self.data_dir}/lines.csv'):
             os.remove(f'{self.data_dir}/lines.csv')
 
+        counter = 0
+
         with open('data/horizon/lines.json', 'w') as f:
             flat_dict = {}
             for i, key in enumerate(self.lines.frames):
                 lines = [l.flat for l in self.get_lines(key)]
                 if len(lines) > 0:
-                    filename = f'frame_{i:05d}.png'
+                    filename = f'frame_{counter:05d}.png'
                     flat_dict[filename] = lines
+                    counter += 1
             s = json.dumps(flat_dict)
             f.write(s)
 
         num_images = len(self.lines)
         count = 0
+        counter = 0
 
-        for i, frame in enumerate(self.lines.frames):
+        for i, frame in enumerate(tqdm(self.lines.frames)):
             lines = self.get_lines(frame)
             if len(lines) > 0:
-                filename = f'{self.data_dir}/frame_{i:05d}.png'
+                filename = f'{self.data_dir}/frame_{counter:05d}.png'
+                counter += 1
                 if not exists(filename):
                     self.reader.set_image_index(frame)
                     iio.imwrite(filename, self.reader.get_next_data(), 'png')
