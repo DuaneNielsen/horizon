@@ -16,7 +16,7 @@ rgb_std = [50.2526, 50.2526, 50.2526]
 
 
 def reverse_norm(img):
-    return img * torch.tensor(rgb_std).reshape(3, 1, 1) + torch.tensor(rgb_mean).reshape(3, 1, 1)
+    return img * 256
 
 
 def make_mask(image_size):
@@ -32,8 +32,8 @@ def prepro(img, h):
 
 
 class HorizonDataSet:
-    def __init__(self, data_dir='data/horizon', num_classes=16, select_label=None, image_size=32,
-                 no_rotate=False, no_mask=False, no_resize=False, no_normalize=False):
+    def __init__(self, data_dir='data/horizon', num_classes=16, select_label=None, image_size=64,
+                 no_rotate=False, no_mask=False, no_resize=False, no_normalize=False, return_orig=False):
         self.data_dir = data_dir
         self.rotate = not no_rotate
         self.mask = not no_mask
@@ -42,6 +42,7 @@ class HorizonDataSet:
         self.bins = num_classes
         self.select_label = select_label
         self.image_size = image_size
+        self.return_orig = return_orig
 
         with open(f'{self.data_dir}/lines.json') as f:
             lines = json.loads(f.read())
@@ -49,27 +50,29 @@ class HorizonDataSet:
         self.index = list(lines)
         self.circular_mask = make_mask(image_size)
 
+    def item_filename_normalized(self, item):
+        return f'{self.data_dir}/normalized/frame_{item:05}.npy'
+
+    def item_filename(self, item):
+        return f'{self.data_dir}/frame_{item:05}.npy'
+
     def __len__(self):
         return len(self.lines)
 
     def __getitem__(self, item):
 
-        img = read_image(f'{self.data_dir}/{self.index[item]}').float()
+        img = np.load(self.item_filename_normalized(item)).squeeze()
+        img = torch.from_numpy(img)
 
-        """ 
-        The image will be resized from its original size to a h x h square
-        since the aspect ratio changes, this will also mean we need to rescale the lines and angles
-        """
-        h = self.image_size
-        orig_h, orig_w = img.shape[1], img.shape[2]
+        #
+        # """
+        # The image will be resized from its original size to a h x h square
+        # since the aspect ratio changes, this will also mean we need to rescale the lines and angles
+        # """
+        h = img.shape[1]
+        orig_h, orig_w = 560, 1280
         rescale_x_factor = orig_h / orig_w
         scale = orig_h / h
-
-        if self.resize:
-            img = resize(img, [h, h])
-
-        if self.normalize:
-            img = normalize(img, rgb_mean, rgb_std, inplace=True)
 
         # load the serialized form into a numpy array
         lines = np.stack([Line.from_flat(line).to_numpy() for line in self.lines[self.index[item]]], axis=-1)
@@ -109,8 +112,18 @@ class HorizonDataSet:
             'angle': angle,
             'discrete': discrete,
             'discrete_min': discrete * slise_size,
-            'discrete_max': (discrete + 1) * slise_size
+            'discrete_max': (discrete + 1) * slise_size,
+            'item': item,
         }
+
+        if self.return_orig:
+
+            orig = read_image(f'{self.data_dir}/{self.index[item]}').float()
+
+            if self.select_label is not None:
+                return img, orig, labels[self.select_label]
+            else:
+                return img, orig, labels
 
         if self.select_label is not None:
             return img, labels[self.select_label]

@@ -53,7 +53,9 @@ def test_horizon_dataset_visually():
     fig, ax = plt.subplots()
     fig.canvas.draw()
     ds = dataset.HorizonDataSet(data_dir='data/test_visual', no_rotate=True, num_classes=16, image_size=64)
-    for img, label in ds:
+    print(len(ds))
+    for i in range(len(ds)):
+        img, label = ds[i]
         ax.clear()
 
         # plot the lines

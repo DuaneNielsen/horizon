@@ -38,7 +38,7 @@ tensor-buf-pool-size=6
 network-color-format=0
     # 0=FP32, 1=UINT8, 2=INT8, 3=UINT32, 4=INT32, 5=FP16
 tensor-data-type=0
-tensor-name=input_1
+tensor-name=modelInput
     # 0=NVBUF_MEM_DEFAULT 1=NVBUF_MEM_CUDA_PINNED 2=NVBUF_MEM_CUDA_DEVICE 3=NVBUF_MEM_CUDA_UNIFIED 4=NVBUF_MEM_SURFACE_ARRAY
 scaling-pool-memory-type=2
     # 0=NvBufSurfTransformCompute_Default 1=NvBufSurfTransformCompute_GPU 2=NvBufSurfTransformCompute_VIC
@@ -53,7 +53,7 @@ custom-lib-path=/opt/nvidia/deepstream/deepstream-6.0/lib/gst-plugins/libcustom2
 custom-tensor-preparation-function=CustomTensorPreparation
 
 [user-configs]
-pixel-normalization-factor=0.003921568
+pixel-normalization-factor=0.0052
 #offsets=
 #mean-file=
 

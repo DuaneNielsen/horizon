@@ -17,6 +17,7 @@ from pytorch_lightning.utilities.types import TRAIN_DATALOADERS, EVAL_DATALOADER
 from torch.utils.data import random_split, dataloader
 from math import ceil
 import gi
+
 gi.require_version('Gst', '1.0')
 from gi.repository import Gst
 import sys
@@ -30,6 +31,9 @@ import time
 from pathlib import Path
 import ctypes
 import numpy as np
+from pyds import NvDsMetaType
+
+# from cupy.cuda.runtime import hostAlloc, memcpy, freeHost
 
 
 def to_numpy(l_meta):
@@ -46,6 +50,7 @@ def probe_nvdsosd_pad_src_data(pad, info):
 
     gst_buffer = info.get_buffer()
     batch_meta = pyds.gst_buffer_get_nvds_batch_meta(hash(gst_buffer))
+
     l_frame = batch_meta.frame_meta_list
     while l_frame is not None:
         try:
@@ -54,10 +59,17 @@ def probe_nvdsosd_pad_src_data(pad, info):
             break
         frame_number = frame_meta.frame_num
         l_obj = frame_meta.obj_meta_list
+
         l_meta = frame_meta.frame_user_meta_list
+
+        print(f'frame_number: {frame_number}')
+        print(f'l_obj: {l_obj}')
+        print(f'l_meta: {l_meta}')
+
         while l_meta is not None:
             probs = to_numpy(l_meta)
             angle = np.argmax(probs)
+            print(probs)
             print(f'estimate {angle}')
             try:
                 l_meta = l_meta.next
@@ -71,65 +83,91 @@ def probe_nvdsosd_pad_src_data(pad, info):
     return Gst.PadProbeReturn.OK
 
 
-class AppSrcPipeline(gstreamer.GstPipeline):
-    """
-    A gstreamer pipeline to test inferance
-    """
+def probe_nvdspreprocess_pad_src_data(pad, info):
+    # settrace()
+    print('entered probe probe_nvdspreprocess_pad_src_data')
+
+    gst_buffer = info.get_buffer()
+    batch_meta = pyds.gst_buffer_get_nvds_batch_meta(hash(gst_buffer))
+    l_user = batch_meta.batch_user_meta_list
+    while l_user is not None:
+        try:
+            user_meta = pyds.NvDsUserMeta.cast(l_user.data)
+        except StopIteration:
+            break
+
+        if user_meta:
+
+            try:
+
+                base_meta = pyds.NvDsBaseMeta.cast(user_meta.base_meta)
+                print(f'base_meta.meta_type {base_meta.meta_type}')
+                if base_meta.meta_type == NvDsMetaType.NVDS_PREPROCESS_BATCH_META:
+                    nvds_prepro_batch_meta = pyds.GstNvDsPreProcessBatchMeta.cast(user_meta.user_meta_data)
+                    nvds_tensor = pyds.NvDsPreProcessTensorMeta.cast(nvds_prepro_batch_meta.tensor_meta)
+                    print(f'buffer_size {nvds_tensor.buffer_size}')
+                    print(f'tensor_shape {nvds_tensor.tensor_shape}')
+                    print(f'data_type {nvds_tensor.data_type}')
+                    print(f'gpu_id {nvds_tensor.gpu_id}')
+
+                    # cuda_mem_ptr = pyds.get_ptr(nvds_tensor.raw_tensor_buffer)
+                    # host_mem_ptr = hostAlloc(nvds_tensor.buffer_size, 0)
+                    # memcpy(host_mem_ptr, cuda_mem_ptr, nvds_tensor.buffer_size, 0)
+                    # ptr = ctypes.cast(host_mem_ptr, ctypes.POINTER(ctypes.c_float))
+                    # ctypes_array = np.ctypeslib.as_array(ptr, shape=nvds_tensor.tensor_shape)
+                    # array = np.array(ctypes_array, copy=True)
+                    # freeHost(host_mem_ptr)
+
+                    # print('deepstream prepro')
+                    # print(array.shape)
+                    # print(array)
+
+                    # rgb_array = (array[0] * 256).astype(np.uint8).transpose(1, 2, 0)
+                    # cv2.imshow("baseball", rgb_array)
+                    # cv2.waitKey(1)
+
+                if base_meta.meta_type == NvDsMetaType.NVDSINFER_TENSOR_OUTPUT_META:
+                    tensor_meta = pyds.NvDsInferTensorMeta.cast(user_meta.user_meta_data)
+                    layer = pyds.get_nvds_LayerInfo(tensor_meta, 0)
+                    ptr = ctypes.cast(pyds.get_ptr(layer.buffer), ctypes.POINTER(ctypes.c_float))
+                    array = np.array(np.ctypeslib.as_array(ptr, shape=(layer.dims.numElements,)), copy=True)
+                    print(array)
+
+            except StopIteration:
+                break
+
+            try:
+                l_user = l_user.next
+            except StopIteration:
+                break
+
+    return Gst.PadProbeReturn.OK
+
+
+class DeepstreamPrepro(gstreamer.GstCommandPipeline):
+    def __init__(self):
+        command = f'appsrc name=numpy-source block=True caps=video/x-raw,format=RGBA,width=1280,height=560,framerate=1/1 ' \
+                  f'! nvvideoconvert ' \
+                  f'! m.sink_0 nvstreammux name=m gpu-id=0 batch-size=1 width=1280 height=560 batched-push-timeout=4000000 nvbuf-memory-type={int(pyds.NVBUF_MEM_CUDA_DEVICE)} ' \
+                  f'! nvdspreprocess name=prepro config-file= roll_classifier_prepro.txt ' \
+                  f'! nvinfer name=nvinfer config-file-path= roll_classifier_pgie_old.txt raw-output-file-write=1 ' \
+                  f'! nvmultistreamtiler width=1280 height=560 ! nvvideoconvert ! nvdsosd name=nvosd ! nveglglessink'
+        super().__init__(command)
+
     def on_pipeline_init(self) -> None:
-        # Source element for reading from the file
-        print("Creating Source \n ")
-        appsource = Gst.ElementFactory.make("appsrc", "numpy-source")
-        appsource_caps = Gst.Caps.from_string("video/x-raw,format=RGBA,width=1280,height=560, framerate=1/1")
-        appsource.set_property("block", True)
-        appsource.set_property('caps', appsource_caps)
+        # prepro = self.get_by_name('prepro')
+        # prepro_src = prepro.get_static_pad('src')
+        # prepro_src.add_probe(Gst.PadProbeType.BUFFER, probe_nvdspreprocess_pad_src_data)
 
-        nvvideoconvert_in = Gst.ElementFactory.make("nvvideoconvert", "nv-videoconv-in")
+        nvinfer = self.get_by_name('nvinfer')
+        nvinfer_sink = nvinfer.get_static_pad('sink')
+        nvinfer_sink.add_probe(Gst.PadProbeType.BUFFER, probe_nvdspreprocess_pad_src_data)
+        nvinfer_src = nvinfer.get_static_pad('src')
+        nvinfer_src.add_probe(Gst.PadProbeType.BUFFER, probe_nvdspreprocess_pad_src_data)
 
-        nvstreammux = Gst.ElementFactory.make("nvstreammux")
-        nvstreammux.set_property('width', 64)
-        nvstreammux.set_property('height', 64)
-        nvstreammux.set_property('batch-size', 1)
-        nvstreammux.set_property('batched-push-timeout', 4000000)
-        nvstreammux_sink_0 = nvstreammux.get_request_pad("sink_0")
-
-        nvinfer = Gst.ElementFactory.make("nvinfer")
-        nvinfer.set_property('config-file-path', "roll_classifier_pgie_config.txt")
-
-        nvvideoconvert_out = Gst.ElementFactory.make("nvvideoconvert", "nv-videoconv-out")
-
-        caps_filter = Gst.ElementFactory.make("capsfilter", "capsfilter1")
-
-        nvdsosd = Gst.ElementFactory.make('nvdsosd', 'nvdsosd')
-        nvdsosd.get_static_pad("sink").add_probe(Gst.PadProbeType.BUFFER, probe_nvdsosd_pad_src_data)
-
-        sink = Gst.ElementFactory.make("nveglglessink", "nvvideo-renderer")
-
-        caps = Gst.Caps.from_string("video/x-raw(memory:NVMM),format=NV12,width=64,height=64, framerate=1/1")
-        caps_filter.set_property('caps', caps)
-
-        nvvideoconvert_out_pad_src = nvvideoconvert_out.get_static_pad('src')
-
-        print("Adding elements to Pipeline \n")
-        self.pipeline.add(appsource)
-        self.pipeline.add(nvvideoconvert_in)
-        self.pipeline.add(nvstreammux)
-        self.pipeline.add(nvinfer)
-        self.pipeline.add(nvvideoconvert_out)
-        self.pipeline.add(caps_filter)
-        self.pipeline.add(nvdsosd)
-        self.pipeline.add(sink)
-
-        # Working Link pipeline
-        print("Linking elements in the Pipeline \n")
-
-        appsource.link(nvvideoconvert_in)
-        nvvideoconvert_in.link(nvstreammux)
-        nvstreammux.link(nvinfer)
-        nvinfer.link(nvvideoconvert_out)
-        #nvvideoconvert_out.link(caps_filter)
-        #caps_filter.link(nvdsosd)
-        nvvideoconvert_out.link(nvdsosd)
-        nvdsosd.link(sink)
+    def on_eos(self, bus: Gst.Bus, message: Gst.Message):
+        # cv2.destroyAllWindows()
+        self._shutdown_pipeline()
 
 
 class WandbImagePredCallback(pl.Callback):
@@ -164,10 +202,11 @@ class HorizonRollClassifier(pl.LightningModule):
     def __init__(self, model_str: str, data_dir: str, lr: float = 1e-4, batch_size: int = 8,
                  select_label: str = 'discrete',
                  num_classes: int = 16, num_workers: int = 0, image_size: int = 64,
-                 no_rotate: bool = False, no_mask: bool = False, no_resize=False, no_normalize=False):
+                 no_rotate: bool = False, no_mask: bool = False, no_resize=False, no_normalize=False,
+                 return_orig: bool = False):
         super().__init__()
         self.save_hyperparameters()
-
+        self.data_dir = data_dir
         self.train_acc = torchmetrics.Accuracy()
         self.val_acc = torchmetrics.Accuracy()
 
@@ -175,7 +214,7 @@ class HorizonRollClassifier(pl.LightningModule):
         self.dataset_kwargs = {'data_dir': data_dir,
                                'num_classes': num_classes, 'select_label': select_label, 'image_size': image_size,
                                'no_rotate': no_rotate, 'no_mask': no_mask, 'no_resize': no_resize,
-                               'no_normalize': no_normalize}
+                               'no_normalize': no_normalize, 'return_orig': return_orig}
 
         self.dataloader_kwargs = {'batch_size': batch_size, 'num_workers': num_workers}
         self.model = timm.create_model(model_name=model_str, num_classes=num_classes)
@@ -211,6 +250,7 @@ class HorizonRollClassifier(pl.LightningModule):
     def training_step(self, train_batch, batch_idx):
         x, y = train_batch
         logits = self.forward(x)
+
         loss = self.cross_entropy_loss(logits, y)
 
         logs = {'train_loss': loss.item()}
@@ -242,7 +282,7 @@ class HorizonRollClassifier(pl.LightningModule):
         log = {
             'val/val_loss': avg_loss,
             'val/acc_epoch': self.val_acc
-            }
+        }
         [self.log(k, v) for k, v in log.items()]
         return log
 
@@ -253,7 +293,7 @@ class HorizonRollClassifier(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
-        lr_scheduler = {'scheduler': torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.95),
+        lr_scheduler = {'scheduler': torch.optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.1),
                         'name': 'expo_lr'}
         return [optimizer], [lr_scheduler]
 
@@ -272,14 +312,16 @@ class HorizonRollClassifier(pl.LightningModule):
     def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: Optional[int] = None) -> Any:
         global pipeline
         appsource = pipeline.get_by_name('numpy-source')
-        images, labels = batch
-        for img, label in zip(images, labels):
-            arr = img.permute(1, 2, 0).byte().numpy()
+        images, originals, labels = batch
+        for img, orig, label in zip(images, originals, labels):
+            arr = orig.permute(1, 2, 0).byte().numpy()
             arr = cv2.cvtColor(arr, cv2.COLOR_RGB2RGBA)
+
             gst_buffer = gstreamer.ndarray_to_gst_buffer(arr)
             appsource.emit("push-buffer", gst_buffer)
             time.sleep(1.0)
-            print(f'label: {label.item()}')
+            # torch_output = self.model.forward(img.unsqueeze(0))
+            # print(torch_output)
         return None
 
 
@@ -311,25 +353,25 @@ def convert_ONNX(model, onnx_filename, input_size):
                       do_constant_folding=True,  # whether to execute constant folding for optimization
                       input_names=['modelInput'],  # the model's input names
                       output_names=['modelOutput'])  # the model's output names
-                      # dynamic_axes={'modelInput': {1: 'batch_size'},  # variable length axes
-                      #               'modelOutput': {1: 'batch_size'}})
+    # dynamic_axes={'modelInput': {1: 'batch_size'},  # variable length axes
+    #               'modelOutput': {1: 'batch_size'}})
     print(" ")
     print('Model has been converted to ONNX')
 
 
 def predict_checkpoint(args):
-
     model = HorizonRollClassifier.load_from_checkpoint(args.predict_checkpoint, no_mask=True, no_resize=True,
-                                                       no_normalize=True, no_rotate=True)
+                                                       no_normalize=True, no_rotate=True,
+                                                       return_orig=True)
 
     checkpt_path = Path(args.predict_checkpoint)
     onnx_path = checkpt_path.parent / Path(checkpt_path.stem + '.onnx')
-    #if not onnx_path.exists():
+    # if not onnx_path.exists():
     convert_ONNX(model.model, str(onnx_path), (1, 3, model.hparams.image_size, model.hparams.image_size))
 
     with gstreamer.GstContext():
         global pipeline
-        pipeline = AppSrcPipeline()
+        pipeline = DeepstreamPrepro()
         try:
             pipeline.startup()
             trainer = pl.Trainer()
@@ -387,4 +429,3 @@ if __name__ == '__main__':
         predict_checkpoint(args)
     else:
         train(args)
-

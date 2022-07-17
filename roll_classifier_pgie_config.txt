@@ -56,25 +56,31 @@
 input-tensor-from-meta=1
 network-type=1
 gpu-id=0
-net-scale-factor=0.019899468
 batch-size=1
-model-engine-file=checkpoints/classifier/leafy-snowflake-43/epoch=173-step=7829.engine
-#onnx-file=checkpoints/classifier/leafy-snowflake-43/epoch=173-step=7829.onnx
+
+# create the engine file with the command
+# trtexec --onnx='epoch=173-step=7829.onnx' --explicitBatch --workspace=2048 --saveEngine=epoch=173-step=7829.engine
+model-engine-file=checkpoints/classifier/northern-breeze-53/epoch=196-step=8864.ckpt.engine
+
+# onnx-file=checkpoints/classifier/northern-breeze-53/epoch=196-step=8864.ckpt
 #labelfile-path=/opt/nvidia/deepstream/deepstream/samples/models/Primary_Detector/labels.txt
+
 gie-unique-id=1
 network-mode=0
-offsets=98.1326;98.1326;98.1326
+# offsets=98.1326;98.1326;98.1326
+
 output-blob-names=modelOutput
 force-implicit-batch-dim=1
 process-mode=1
-num-detected-classes=16
+# num-detected-classes=16
 interval=0
 output-tensor-meta=1
-
+is-classifier=True
+classifier-threshold=0.5
 #scaling-filter=0
 #scaling-compute-hw=0
 
-#[class-attrs-all]
-#pre-cluster-threshold=0.2
-#eps=0.2
-#group-threshold=1
+[class-attrs-all]
+pre-cluster-threshold=0.2
+eps=0.2
+group-threshold=1
