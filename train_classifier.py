@@ -85,7 +85,7 @@ def probe_nvdsosd_pad_src_data(pad, info):
     return Gst.PadProbeReturn.OK
 
 
-def add_lines(pad, info):
+def draw_line(pad, info):
     gst_buffer = info.get_buffer()
     batch_meta = pyds.gst_buffer_get_nvds_batch_meta(hash(gst_buffer))
     l_frame = batch_meta.frame_meta_list
@@ -198,7 +198,7 @@ class DeepstreamPrepro(gstreamer.GstCommandPipeline):
 
         nvosd = self.get_by_name('nvosd')
         nvosd_sink = nvosd.get_static_pad('sink')
-        nvosd_sink.add_probe(Gst.PadProbeType.BUFFER, add_lines)
+        nvosd_sink.add_probe(Gst.PadProbeType.BUFFER, draw_line)
 
     def on_eos(self, bus: Gst.Bus, message: Gst.Message):
         # cv2.destroyAllWindows()
