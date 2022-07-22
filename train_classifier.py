@@ -32,6 +32,8 @@ from pathlib import Path
 import ctypes
 import numpy as np
 from pyds import NvDsMetaType
+import onnxruntime as ort
+import onnx
 
 # from cupy.cuda.runtime import hostAlloc, memcpy, freeHost
 
@@ -75,6 +77,35 @@ def probe_nvdsosd_pad_src_data(pad, info):
                 l_meta = l_meta.next
             except StopIteration:
                 break
+        try:
+            l_frame = l_frame.next
+        except StopIteration:
+            break
+
+    return Gst.PadProbeReturn.OK
+
+
+def add_lines(pad, info):
+    gst_buffer = info.get_buffer()
+    batch_meta = pyds.gst_buffer_get_nvds_batch_meta(hash(gst_buffer))
+    l_frame = batch_meta.frame_meta_list
+
+    while l_frame is not None:
+
+        frame_meta = pyds.NvDsFrameMeta.cast(l_frame.data)
+        display_meta = pyds.nvds_acquire_display_meta_from_pool(batch_meta)
+
+        display_meta.num_lines = 1
+        display_meta.line_params[0].x1 = 300
+        display_meta.line_params[0].y1 = 560 // 2
+        display_meta.line_params[0].x2 = 1280 - 300
+        display_meta.line_params[0].y2 = 560 // 2
+        display_meta.line_params[0].line_width = 4
+        display_meta.line_params[0].line_color.red = 1.0
+        display_meta.line_params[0].line_color.alpha = 1.0
+
+        pyds.nvds_add_display_meta_to_frame(frame_meta, display_meta)
+
         try:
             l_frame = l_frame.next
         except StopIteration:
@@ -165,6 +196,10 @@ class DeepstreamPrepro(gstreamer.GstCommandPipeline):
         nvinfer_src = nvinfer.get_static_pad('src')
         nvinfer_src.add_probe(Gst.PadProbeType.BUFFER, probe_nvdspreprocess_pad_src_data)
 
+        nvosd = self.get_by_name('nvosd')
+        nvosd_sink = nvosd.get_static_pad('sink')
+        nvosd_sink.add_probe(Gst.PadProbeType.BUFFER, add_lines)
+
     def on_eos(self, bus: Gst.Bus, message: Gst.Message):
         # cv2.destroyAllWindows()
         self._shutdown_pipeline()
@@ -220,6 +255,10 @@ class HorizonRollClassifier(pl.LightningModule):
         self.model = timm.create_model(model_name=model_str, num_classes=num_classes)
         self.train_set = None
         self.val_set = None
+
+    @property
+    def batch_size(self):
+        return self.dataloader_kwargs['batch_size']
 
     @classmethod
     def from_argparse_args(cls, args):
@@ -311,15 +350,43 @@ class HorizonRollClassifier(pl.LightningModule):
 
     def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: Optional[int] = None) -> Any:
         global pipeline
+        global onx_sess
         appsource = pipeline.get_by_name('numpy-source')
         images, originals, labels = batch
-        for img, orig, label in zip(images, originals, labels):
+        self.eval()
+        y = self.forward(images)
+
+        for i, (img, orig, label) in enumerate(zip(images, originals, labels)):
+            seq_id = batch_idx * self.batch_size + i
+            print(seq_id)
             arr = orig.permute(1, 2, 0).byte().numpy()
             arr = cv2.cvtColor(arr, cv2.COLOR_RGB2RGBA)
 
             gst_buffer = gstreamer.ndarray_to_gst_buffer(arr)
             appsource.emit("push-buffer", gst_buffer)
             time.sleep(1.0)
+
+            infer_input = np.fromfile(
+                f'gstnvdsinfer_uid-01_layer-modelInput_batch-{seq_id:010}_batchsize-01.bin',
+                dtype=np.float32).reshape(1, 3, 64, 64)
+            print((infer_input - img.numpy()).sum())
+
+            infer_output = np.fromfile(
+                f'gstnvdsinfer_uid-01_layer-modelOutput_batch-{seq_id:010}_batchsize-01.bin',
+                dtype=np.float32)
+
+            print('***********************************************')
+            print('PYTORCH  OUTPUT')
+            print(np.argmax(y[i].numpy()))
+            print('ONNX  OUTPUT')
+            outputs = ort_sess.run(None, {'modelInput': img.unsqueeze(0).numpy()})
+            print(np.argmax(outputs[0][0]))
+            # print(outputs[1][0])
+            # print(outputs[2][0])
+            print('TENSORRT OUTPUT')
+            print(np.argmax(infer_output))
+            print('***********************************************')
+
             # torch_output = self.model.forward(img.unsqueeze(0))
             # print(torch_output)
         return None
@@ -355,11 +422,16 @@ def convert_ONNX(model, onnx_filename, input_size):
                       output_names=['modelOutput'])  # the model's output names
     # dynamic_axes={'modelInput': {1: 'batch_size'},  # variable length axes
     #               'modelOutput': {1: 'batch_size'}})
-    print(" ")
-    print('Model has been converted to ONNX')
+    print("*************************************")
+    print(f'Saving onnx model to {onnx_filename}')
+    print("*************************************")
+
+
+global ort_sess
 
 
 def predict_checkpoint(args):
+    global ort_sess
     model = HorizonRollClassifier.load_from_checkpoint(args.predict_checkpoint, no_mask=True, no_resize=True,
                                                        no_normalize=True, no_rotate=True,
                                                        return_orig=True)
@@ -367,7 +439,10 @@ def predict_checkpoint(args):
     checkpt_path = Path(args.predict_checkpoint)
     onnx_path = checkpt_path.parent / Path(checkpt_path.stem + '.onnx')
     # if not onnx_path.exists():
+    model.eval()
     convert_ONNX(model.model, str(onnx_path), (1, 3, model.hparams.image_size, model.hparams.image_size))
+
+    ort_sess = ort.InferenceSession('study/test.onnx', '', providers=['CUDAExecutionProvider'])
 
     with gstreamer.GstContext():
         global pipeline
