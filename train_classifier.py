@@ -88,6 +88,26 @@ def probe_nvdsosd_pad_src_data(pad, info):
 def draw_line(pad, info):
     gst_buffer = info.get_buffer()
     batch_meta = pyds.gst_buffer_get_nvds_batch_meta(hash(gst_buffer))
+    l_user = batch_meta.batch_user_meta_list
+    angles = []
+
+    while l_user is not None:
+        user_meta = pyds.NvDsUserMeta.cast(l_user.data)
+        base_meta = pyds.NvDsBaseMeta.cast(user_meta.base_meta)
+
+        if base_meta.meta_type == NvDsMetaType.NVDSINFER_TENSOR_OUTPUT_META:
+            tensor_meta = pyds.NvDsInferTensorMeta.cast(user_meta.user_meta_data)
+            layer = pyds.get_nvds_LayerInfo(tensor_meta, 0)
+            ptr = ctypes.cast(pyds.get_ptr(layer.buffer), ctypes.POINTER(ctypes.c_float))
+            array = np.array(np.ctypeslib.as_array(ptr, shape=(layer.dims.numElements,)), copy=True)
+            angles.append(np.argmax(array))
+
+        try:
+            l_user = l_user.next
+        except StopIteration:
+            break
+
+    counter = 0
     l_frame = batch_meta.frame_meta_list
 
     while l_frame is not None:
@@ -95,19 +115,33 @@ def draw_line(pad, info):
         frame_meta = pyds.NvDsFrameMeta.cast(l_frame.data)
         display_meta = pyds.nvds_acquire_display_meta_from_pool(batch_meta)
 
+        center_x, center_y = 1280 // 2, 560 // 2
+        angle = angles[counter]/16 * 2 * np.pi
+
         display_meta.num_lines = 1
-        display_meta.line_params[0].x1 = 300
-        display_meta.line_params[0].y1 = 560 // 2
-        display_meta.line_params[0].x2 = 1280 - 300
-        display_meta.line_params[0].y2 = 560 // 2
+        display_meta.line_params[0].x1 = center_x
+        display_meta.line_params[0].y1 = center_y
+        display_meta.line_params[0].x2 = center_x + np.floor(np.cos(angle) * 200).astype(np.int)
+        display_meta.line_params[0].y2 = center_y + np.floor(np.sin(angle) * 200).astype(np.int)
         display_meta.line_params[0].line_width = 4
         display_meta.line_params[0].line_color.red = 1.0
         display_meta.line_params[0].line_color.alpha = 1.0
+
+        display_meta.num_labels = 1
+        display_meta.text_params[0].display_text = f'{angles[counter]}'
+        display_meta.text_params[0].x_offset = 10
+        display_meta.text_params[0].y_offset = 12
+        display_meta.text_params[0].font_params.font_name = 'Serif'
+        display_meta.text_params[0].font_params.font_size = 24
+        display_meta.text_params[0].font_params.font_color.set(1.0, 1.0, 1.0, 1.0)
+        display_meta.text_params[0].set_bg_clr = 1
+        display_meta.text_params[0].text_bg_clr.set(0.0, 0.0, 0.0, 1.0)
 
         pyds.nvds_add_display_meta_to_frame(frame_meta, display_meta)
 
         try:
             l_frame = l_frame.next
+            counter += 1
         except StopIteration:
             break
 

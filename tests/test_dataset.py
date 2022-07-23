@@ -98,6 +98,7 @@ def test_horizon_dataset_visually():
         ax.plot(horizon[0], horizon[1], color='white', linewidth='4')
         ax.plot(discrete_min[0], discrete_min[1], color='blue', linewidth='2')
         ax.plot(discrete_max[0], discrete_max[1], color='red', linewidth='2')
+        ax.text(32, 20, f"DISCRETE: {label['discrete']}", color='white', fontsize=15)
 
         img = dataset.reverse_norm(img)
 
