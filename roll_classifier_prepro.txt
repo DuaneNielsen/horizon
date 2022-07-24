@@ -60,5 +60,5 @@ pixel-normalization-factor=0.0052
 [group-0]
 src-ids=0
 #custom-input-transformation-function=CustomAsyncTransformation
-process-on-roi=0
-roi-params-src-0=0;540;900;500;960;0;900;500
+process-on-roi=1
+roi-params-src-0=0;0;1280;560

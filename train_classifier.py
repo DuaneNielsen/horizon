@@ -128,11 +128,11 @@ def draw_line(pad, info):
         display_meta.line_params[0].line_color.alpha = 1.0
 
         display_meta.num_labels = 1
-        display_meta.text_params[0].display_text = f'{angles[counter]}'
-        display_meta.text_params[0].x_offset = 10
-        display_meta.text_params[0].y_offset = 12
+        display_meta.text_params[0].display_text = f'prediction: {angles[counter]}'
+        display_meta.text_params[0].x_offset = 600
+        display_meta.text_params[0].y_offset = 560
         display_meta.text_params[0].font_params.font_name = 'Serif'
-        display_meta.text_params[0].font_params.font_size = 24
+        display_meta.text_params[0].font_params.font_size = 40
         display_meta.text_params[0].font_params.font_color.set(1.0, 1.0, 1.0, 1.0)
         display_meta.text_params[0].set_bg_clr = 1
         display_meta.text_params[0].text_bg_clr.set(0.0, 0.0, 0.0, 1.0)
@@ -211,12 +211,12 @@ def probe_nvdspreprocess_pad_src_data(pad, info):
 
 class DeepstreamPrepro(gstreamer.GstCommandPipeline):
     def __init__(self):
-        command = f'appsrc name=numpy-source block=True caps=video/x-raw,format=RGBA,width=1280,height=560,framerate=1/1 ' \
+        command = f'appsrc name=numpy-source block=True caps=video/x-raw,format=RGBA,width=1280,height=660,framerate=1/1 ' \
                   f'! nvvideoconvert ' \
-                  f'! m.sink_0 nvstreammux name=m gpu-id=0 batch-size=1 width=1280 height=560 batched-push-timeout=4000000 nvbuf-memory-type={int(pyds.NVBUF_MEM_CUDA_DEVICE)} ' \
+                  f'! m.sink_0 nvstreammux name=m gpu-id=0 batch-size=1 width=1280 height=660 batched-push-timeout=4000000 nvbuf-memory-type={int(pyds.NVBUF_MEM_CUDA_DEVICE)} ' \
                   f'! nvdspreprocess name=prepro config-file= roll_classifier_prepro.txt ' \
                   f'! nvinfer name=nvinfer config-file-path= roll_classifier_pgie_old.txt raw-output-file-write=1 ' \
-                  f'! nvmultistreamtiler width=1280 height=560 ! nvvideoconvert ! nvdsosd name=nvosd ! nveglglessink'
+                  f'! nvmultistreamtiler width=1280 height=660 ! nvvideoconvert ! nvdsosd name=nvosd ! nveglglessink'
         super().__init__(command)
 
     def on_pipeline_init(self) -> None:
@@ -390,21 +390,32 @@ class HorizonRollClassifier(pl.LightningModule):
         self.eval()
         y = self.forward(images)
 
+        # send images in the batch 1 by 1
         for i, (img, orig, label) in enumerate(zip(images, originals, labels)):
+
+            # convert CHW-RBG to HWC-RGB
             seq_id = batch_idx * self.batch_size + i
-            print(seq_id)
             arr = orig.permute(1, 2, 0).byte().numpy()
+
+            # attach label to image
+            label_img = np.zeros(shape=(100, 1280, 3), dtype=np.uint8)
+            cv2.putText(img=label_img, text=f'label: {label}', org=(20, 50), fontFace=cv2.FONT_HERSHEY_TRIPLEX, fontScale=2,
+                        color=(0, 255, 0), thickness=2)
+            arr = np.concatenate((arr, label_img), axis=0)
+
             arr = cv2.cvtColor(arr, cv2.COLOR_RGB2RGBA)
 
+            # push to buffer
             gst_buffer = gstreamer.ndarray_to_gst_buffer(arr)
             appsource.emit("push-buffer", gst_buffer)
             time.sleep(1.0)
 
+            # load nvinfer input from file and verify its the same
             infer_input = np.fromfile(
                 f'gstnvdsinfer_uid-01_layer-modelInput_batch-{seq_id:010}_batchsize-01.bin',
                 dtype=np.float32).reshape(1, 3, 64, 64)
-            print((infer_input - img.numpy()).sum())
 
+            # load nvinfer output from file to verify results are the same as pytorch output
             infer_output = np.fromfile(
                 f'gstnvdsinfer_uid-01_layer-modelOutput_batch-{seq_id:010}_batchsize-01.bin',
                 dtype=np.float32)
