@@ -37,8 +37,6 @@ python train_regression.py --predict_checkpoint checkpoints/crimson-sea-41/epoch
 
 ```bash
 pip3 install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu113
-
-
 pip3 install torch-tensorrt -f https://github.com/NVIDIA/Torch-TensorRT/releases
 ```
 

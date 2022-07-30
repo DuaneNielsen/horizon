@@ -14,7 +14,7 @@ from dataset import HorizonDataSet
 from pytorch_lightning.utilities import argparse as pl_argparse
 import timm
 from pytorch_lightning.utilities.types import TRAIN_DATALOADERS, EVAL_DATALOADERS
-from torch.utils.data import random_split, dataloader
+from torch.utils.data import random_split, dataloader, RandomSampler
 from math import ceil
 import gi
 
@@ -84,7 +84,9 @@ def probe_nvdsosd_pad_src_data(pad, info):
 
     return Gst.PadProbeReturn.OK
 
-
+"""
+Draws inference results on the overlay
+"""
 def draw_line(pad, info):
     gst_buffer = info.get_buffer()
     batch_meta = pyds.gst_buffer_get_nvds_batch_meta(hash(gst_buffer))
@@ -285,7 +287,8 @@ class HorizonRollClassifier(pl.LightningModule):
                                'no_rotate': no_rotate, 'no_mask': no_mask, 'no_resize': no_resize,
                                'no_normalize': no_normalize, 'return_orig': return_orig}
 
-        self.dataloader_kwargs = {'batch_size': batch_size, 'num_workers': num_workers}
+        self.dataloader_kwargs = {'batch_size': batch_size, 'num_workers': num_workers,
+                                  'pin_memory': True, }
         self.model = timm.create_model(model_name=model_str, num_classes=num_classes)
         self.train_set = None
         self.val_set = None
@@ -366,8 +369,9 @@ class HorizonRollClassifier(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
-        lr_scheduler = {'scheduler': torch.optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.1),
-                        'name': 'expo_lr'}
+        milestones = [200]
+        lr_scheduler = {'scheduler': torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=milestones, gamma=0.1),
+                        'name': 'learning_rate'}
         return [optimizer], [lr_scheduler]
 
     def test_dataloader(self) -> EVAL_DATALOADERS:
@@ -380,7 +384,8 @@ class HorizonRollClassifier(pl.LightningModule):
         return dataloader.DataLoader(self.val_set, **self.dataloader_kwargs)
 
     def train_dataloader(self) -> TRAIN_DATALOADERS:
-        return dataloader.DataLoader(self.train_set, **self.dataloader_kwargs)
+        sampler = RandomSampler(self.train_set, replacement=True)
+        return dataloader.DataLoader(self.train_set, sampler=sampler, **self.dataloader_kwargs)
 
     def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: Optional[int] = None) -> Any:
         global pipeline
@@ -449,17 +454,25 @@ class DummyPrimaryModel(nn.Module):
 
 
 # Function to Convert to ONNX
-def convert_ONNX(model, onnx_filename, input_size):
+def convert_ONNX(args):
+
+    model = HorizonRollClassifier.load_from_checkpoint(args.convert_onnx_checkpoint, no_mask=True, no_resize=True,
+                                                       no_normalize=True, no_rotate=True,
+                                                       return_orig=True)
+
+    checkpt_path = Path(args.convert_onnx_checkpoint)
+    onnx_file = checkpt_path.parent / Path(checkpt_path.stem + '.onnx')
+
     # set the model to inference mode
     model.eval()
 
     # Let's create a dummy input tensor
-    dummy_input = torch.randn(*input_size, requires_grad=True)
+    dummy_input = torch.randn(1, 3, model.hparams.image_size, model.hparams.image_size, requires_grad=True)
 
     # Export the model
     torch.onnx.export(model,  # model being run
                       dummy_input,  # model input (or a tuple for multiple inputs)
-                      onnx_filename,  # where to save the model
+                      str(onnx_file),  # where to save the model
                       export_params=True,  # store the trained parameter weights inside the model file
                       opset_version=10,  # the ONNX version to export the model to
                       do_constant_folding=True,  # whether to execute constant folding for optimization
@@ -468,7 +481,7 @@ def convert_ONNX(model, onnx_filename, input_size):
     # dynamic_axes={'modelInput': {1: 'batch_size'},  # variable length axes
     #               'modelOutput': {1: 'batch_size'}})
     print("*************************************")
-    print(f'Saving onnx model to {onnx_filename}')
+    print(f'Saving onnx model to {onnx_file}')
     print("*************************************")
 
 
@@ -477,15 +490,10 @@ global ort_sess
 
 def predict_checkpoint(args):
     global ort_sess
+
     model = HorizonRollClassifier.load_from_checkpoint(args.predict_checkpoint, no_mask=True, no_resize=True,
                                                        no_normalize=True, no_rotate=True,
                                                        return_orig=True)
-
-    checkpt_path = Path(args.predict_checkpoint)
-    onnx_path = checkpt_path.parent / Path(checkpt_path.stem + '.onnx')
-    # if not onnx_path.exists():
-    model.eval()
-    convert_ONNX(model.model, str(onnx_path), (1, 3, model.hparams.image_size, model.hparams.image_size))
 
     ort_sess = ort.InferenceSession('study/test.onnx', '', providers=['CUDAExecutionProvider'])
 
@@ -538,6 +546,7 @@ if __name__ == '__main__':
     parser.add_argument('--load_from_checkpoint', type=str, default=None)
     parser.add_argument('--validate_checkpoint', type=str, default=None)
     parser.add_argument('--predict_checkpoint', type=str, default=None)
+    parser.add_argument('--convert_onnx_checkpoint', type=str, default=None)
     args = parser.parse_args()
 
     pl.seed_everything(1234)
@@ -547,5 +556,7 @@ if __name__ == '__main__':
         validate_checkpoint(args)
     elif args.predict_checkpoint is not None:
         predict_checkpoint(args)
+    elif args.convert_onnx_checkpoint is not None:
+        convert_ONNX(args)
     else:
         train(args)
