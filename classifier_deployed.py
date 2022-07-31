@@ -75,13 +75,19 @@ def draw_line(pad, info):
 
 
 class DeepstreamPrepro(gstreamer.GstCommandPipeline):
-    def __init__(self, filename):
+    def __init__(self, filename, rtsp_url=None):
+        if rtsp_url:
+            sink = f'nvvideoconvert ! x264enc speed-preset=veryfast tune=zerolatency bitrate=800 ! rtspclientsink location={rtsp_url}'
+        else:
+            sink = 'nveglglessink'
+
         command = f'filesrc location={filename} ! qtdemux ! h264parse ! avdec_h264 ' \
                   f'! nvvideoconvert ' \
                   f'! m.sink_0 nvstreammux name=m gpu-id=0 batch-size=1 width=1280 height=560 batched-push-timeout=4000000 nvbuf-memory-type={int(pyds.NVBUF_MEM_CUDA_DEVICE)} ' \
                   f'! nvdspreprocess name=prepro config-file= roll_classifier_prepro_infer.txt ' \
                   f'! nvinfer name=nvinfer config-file-path= roll_classifier_pgie_old.txt ' \
-                  f'! nvmultistreamtiler width=1280 height=560 ! nvvideoconvert ! nvdsosd name=nvosd ! nveglglessink'
+                  f'! nvmultistreamtiler width=1280 height=560 ! nvvideoconvert ! nvdsosd name=nvosd ' \
+                  f'! {sink}'
         print(command)
         super().__init__(command)
 
@@ -98,8 +104,9 @@ class DeepstreamPrepro(gstreamer.GstCommandPipeline):
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('--filename')
+    parser.add_argument('--rtsp-url')
     args = parser.parse_args()
-    pipeline = DeepstreamPrepro(args.filename)
+    pipeline = DeepstreamPrepro(args.filename, rtsp_url=args.rtsp_url)
 
     try:
         pipeline.startup()
