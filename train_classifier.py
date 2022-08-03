@@ -36,7 +36,7 @@ import onnxruntime as ort
 import onnx
 
 # from cupy.cuda.runtime import hostAlloc, memcpy, freeHost
-
+global num_classes
 
 def to_numpy(l_meta):
     user_meta = pyds.NvDsUserMeta.cast(l_meta.data)
@@ -88,6 +88,7 @@ def probe_nvdsosd_pad_src_data(pad, info):
 Draws inference results on the overlay
 """
 def draw_line(pad, info):
+    global num_classes
     gst_buffer = info.get_buffer()
     batch_meta = pyds.gst_buffer_get_nvds_batch_meta(hash(gst_buffer))
     l_user = batch_meta.batch_user_meta_list
@@ -118,11 +119,11 @@ def draw_line(pad, info):
         display_meta = pyds.nvds_acquire_display_meta_from_pool(batch_meta)
 
         center_x, center_y = 1280 // 2, 560 // 2
-        angle = angles[counter]/16 * 2 * np.pi
+        angle = angles[counter]/num_classes * 2 * np.pi
 
         display_meta.num_lines = 1
-        display_meta.line_params[0].x1 = center_x
-        display_meta.line_params[0].y1 = center_y
+        display_meta.line_params[0].x1 = center_x - np.floor(np.cos(angle) * 200).astype(np.int)
+        display_meta.line_params[0].y1 = center_y - np.floor(np.sin(angle) * 200).astype(np.int)
         display_meta.line_params[0].x2 = center_x + np.floor(np.cos(angle) * 200).astype(np.int)
         display_meta.line_params[0].y2 = center_y + np.floor(np.sin(angle) * 200).astype(np.int)
         display_meta.line_params[0].line_width = 4
@@ -271,7 +272,7 @@ class WandbImagePredCallback(pl.Callback):
 class HorizonRollClassifier(pl.LightningModule):
 
     def __init__(self, model_str: str, data_dir: str, lr: float = 1e-4, batch_size: int = 8,
-                 select_label: str = 'discrete',
+                 select_label: str = 'discrete', milestones: str = None,
                  num_classes: int = 16, num_workers: int = 0, image_size: int = 64,
                  no_rotate: bool = False, no_mask: bool = False, no_resize=False, no_normalize=False,
                  return_orig: bool = False):
@@ -369,7 +370,13 @@ class HorizonRollClassifier(pl.LightningModule):
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
-        milestones = [200]
+        try:
+            milestones = self.hparams.milestones[1:-1].replace(" ", "").split(',')
+            milestones = [int(s) for s in milestones]
+        except Exception as e:
+            print('exception while parsing lr schedule, provide a string in format [int, int, ...]')
+            raise e
+
         lr_scheduler = {'scheduler': torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=milestones, gamma=0.1),
                         'name': 'learning_rate'}
         return [optimizer], [lr_scheduler]
@@ -418,7 +425,7 @@ class HorizonRollClassifier(pl.LightningModule):
             # load nvinfer input from file and verify its the same
             infer_input = np.fromfile(
                 f'gstnvdsinfer_uid-01_layer-modelInput_batch-{seq_id:010}_batchsize-01.bin',
-                dtype=np.float32).reshape(1, 3, 64, 64)
+                dtype=np.float32).reshape(1, 3, self.hparams.image_size, self.hparams.image_size)
 
             # load nvinfer output from file to verify results are the same as pytorch output
             infer_output = np.fromfile(
@@ -495,7 +502,10 @@ def predict_checkpoint(args):
                                                        no_normalize=True, no_rotate=True,
                                                        return_orig=True)
 
-    ort_sess = ort.InferenceSession('study/test.onnx', '', providers=['CUDAExecutionProvider'])
+    checkpt_path = Path(args.predict_checkpoint)
+    onnx_file = str(checkpt_path.parent / Path(checkpt_path.stem + '.onnx'))
+
+    ort_sess = ort.InferenceSession(onnx_file, '', providers=['CUDAExecutionProvider'])
 
     with gstreamer.GstContext():
         global pipeline
@@ -548,6 +558,7 @@ if __name__ == '__main__':
     parser.add_argument('--predict_checkpoint', type=str, default=None)
     parser.add_argument('--convert_onnx_checkpoint', type=str, default=None)
     args = parser.parse_args()
+    num_classes = args.num_classes
 
     pl.seed_everything(1234)
     wandb_logger = WandbLogger(project='horizon')

@@ -69,7 +69,7 @@ class DeepstreamPreProcessor(GstCommandPipeline):
         self.data_dir = data_dir
         self.counter = start_index
         pathlib.Path(f'{self.data_dir}/normalized').mkdir(parents=True, exist_ok=True)
-        pathlib.Path(f'{self.data_dir}/normalized_jpeg').mkdir(parents=True, exist_ok=True)
+        pathlib.Path(f'{self.data_dir}/normalized_jpg').mkdir(parents=True, exist_ok=True)
         super().__init__(
             f'multifilesrc location = {self.data_dir}/frame_%05d.png start-index={start_index} '
             f'caps=image/png,framerate=(fraction)12/1 '
@@ -110,7 +110,7 @@ if __name__ == '__main__':
 
     with DeepstreamPreProcessor(args.data_dir) as pipeline:
         while not pipeline.is_done:
-            time.sleep(4)
+            time.sleep(1)
             message = pipeline.bus.timed_pop_filtered(1000, Gst.MessageType.EOS)
             if message is not None:
                break

@@ -29,9 +29,9 @@ target-unique-ids=1
     # 0=NCHW, 1=NHWC, 2=CUSTOM
 network-input-order=0
     # tensor shape based on network-input-order
-network-input-shape=1;3;64;64
-processing-width=64
-processing-height=64
+network-input-shape=1;3;128;128
+processing-width=128
+processing-height=128
 scaling-buf-pool-size=6
 tensor-buf-pool-size=6
     # 0=RGB, 1=BGR, 2=GRAY

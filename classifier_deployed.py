@@ -74,6 +74,7 @@ def draw_line(pad, info):
     return Gst.PadProbeReturn.OK
 
 
+
 class DeepstreamPrepro(gstreamer.GstCommandPipeline):
     def __init__(self, filename, rtsp_url=None):
         if rtsp_url:

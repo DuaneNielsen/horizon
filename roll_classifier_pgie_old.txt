@@ -63,7 +63,7 @@ input-tensor-from-meta=1
 # create the engine file with the command
 # trtexec --onnx='epoch=173-step=7829.onnx' --explicitBatch --workspace=2048 --saveEngine=epoch=173-step=7829.engine
 # model-engine-file=checkpoints/classifier/northern-breeze-53/epoch=196-step=8864.ckpt.engine
-model-engine-file=checkpoints/classifier/peach-oath-59/epoch=804-step=18514.engine
+model-engine-file=checkpoints/classifier/quiet-moon-72/epoch=1130-step=1130.engine
 
 #onnx-file=checkpoints/classifier/leafy-snowflake-43/epoch=173-step=7829.onnx
 #labelfile-path=/opt/nvidia/deepstream/deepstream/samples/models/Primary_Detector/labels.txt
