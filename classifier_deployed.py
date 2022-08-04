@@ -8,6 +8,7 @@ import ctypes
 import numpy as np
 import traceback
 import time
+import platform
 
 
 
@@ -82,9 +83,16 @@ class DeepstreamPrepro(gstreamer.GstCommandPipeline):
         else:
             sink = 'nveglglessink'
 
+        if platform.processor() == 'aarch64':
+            print('detected aarch64 assuming jetson')
+            nv_buf_mem_type = int(pyds.NVBUF_MEM_DEFAULT)
+        else:
+            print('detected i386 assuming linux PC')
+            nv_buf_mem_type = int(pyds.NVBUF_MEM_CUDA_DEVICE)
+
         command = f'filesrc location={filename} ! qtdemux ! h264parse ! avdec_h264 ' \
                   f'! nvvideoconvert ' \
-                  f'! m.sink_0 nvstreammux name=m gpu-id=0 batch-size=1 width=1280 height=560 batched-push-timeout=4000000 nvbuf-memory-type={int(pyds.NVBUF_MEM_CUDA_DEVICE)} ' \
+                  f'! m.sink_0 nvstreammux name=m gpu-id=0 batch-size=1 width=1280 height=560 batched-push-timeout=4000000 ' \
                   f'! nvdspreprocess name=prepro config-file= roll_classifier_prepro_infer.txt ' \
                   f'! nvinfer name=nvinfer config-file-path= roll_classifier_pgie_old.txt ' \
                   f'! nvmultistreamtiler width=1280 height=560 ! nvvideoconvert ! nvdsosd name=nvosd ' \
@@ -94,9 +102,10 @@ class DeepstreamPrepro(gstreamer.GstCommandPipeline):
 
     def on_pipeline_init(self) -> None:
 
-        nvosd = self.get_by_name('nvosd')
-        nvosd_sink = nvosd.get_static_pad('sink')
-        nvosd_sink.add_probe(Gst.PadProbeType.BUFFER, draw_line)
+        pass
+        # nvosd = self.get_by_name('nvosd')
+        # nvosd_sink = nvosd.get_static_pad('sink')
+        #nvosd_sink.add_probe(Gst.PadProbeType.BUFFER, draw_line)
 
     def on_eos(self, bus: Gst.Bus, message: Gst.Message):
         self._shutdown_pipeline()
