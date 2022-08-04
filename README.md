@@ -44,3 +44,16 @@ convert onnx model to tensorRT engine
 ```bash
 trtexec --onnx='epoch=173-step=7829.onnx' --explicitBatch --workspace=2048 --saveEngine=epoch=173-step=7829.engine
 ```
+
+## run on jetson
+
+start rtsp simple server on host machine
+```commandline
+./rtsp-simple-server
+```
+
+on jetson machine, rebuild the engine and run
+```bash
+trtexec --onnx='epoch=173-step=7829.onnx' --explicitBatch --workspace=2048 --saveEngine=epoch=173-step=7829.engine
+GST_DEBUG=INFO python3 classifier_deployed.py --filename drone_fpv1.mp4 --rtsp-url rtsp://192.168.1.200:8554/jetson
+```
